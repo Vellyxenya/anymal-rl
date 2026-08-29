@@ -44,6 +44,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import cli_args  # isort: skip
 
 import AnymalTraining.tasks  # noqa: F401
+
 with contextlib.suppress(ImportError):
     import isaaclab_tasks_experimental  # noqa: F401
 

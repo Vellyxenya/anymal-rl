@@ -53,6 +53,7 @@ import cli_args  # isort: skip
 logger = logging.getLogger(__name__)
 
 import AnymalTraining.tasks  # noqa: F401
+
 with contextlib.suppress(ImportError):
     import isaaclab_tasks_experimental  # noqa: F401
 

@@ -38,6 +38,7 @@ args_cli, hydra_args = setup_preset_cli(parser)
 sys.argv = [sys.argv[0]] + hydra_args
 
 import AnymalTraining.tasks  # noqa: F401
+
 MAX_STEPS = 100
 
 

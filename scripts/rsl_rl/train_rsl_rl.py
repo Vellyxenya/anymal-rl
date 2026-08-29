@@ -41,6 +41,7 @@ RL_ROOT = Path(__file__).resolve().parents[1]
 CLI_ARGS = import_local_module("isaaclab_rsl_rl_cli_args", RL_ROOT / "rsl_rl" / "cli_args.py")
 
 import AnymalTraining.tasks  # noqa: F401
+
 with contextlib.suppress(ImportError):
     import isaaclab_tasks_experimental  # noqa: F401
 

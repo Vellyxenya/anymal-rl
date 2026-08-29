@@ -43,10 +43,9 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import AnymalTraining.tasks  # noqa: F401
 import gymnasium as gym
 from prettytable import PrettyTable
-
-import AnymalTraining.tasks  # noqa: F401
 
 # PLACEHOLDER: Extension template (do not remove this comment)
 with contextlib.suppress(ImportError):
