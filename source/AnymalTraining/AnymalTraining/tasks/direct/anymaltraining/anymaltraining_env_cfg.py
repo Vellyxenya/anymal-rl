@@ -10,14 +10,14 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
 
-from isaaclab_assets.robots.cartpole import CARTPOLE_CFG
+from isaaclab_assets.robots.anymal import ANYMAL_C_CFG
 
 
 @configclass
 class AnymaltrainingSceneCfg(InteractiveSceneCfg):
     """Scene configuration using the template-based spawning path."""
 
-    robot: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    robot: ArticulationCfg = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
     ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
     light = AssetBaseCfg(
         prim_path="/World/Light",
@@ -28,15 +28,15 @@ class AnymaltrainingSceneCfg(InteractiveSceneCfg):
 @configclass
 class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     # env
-    decimation = 2
-    episode_length_s = 5.0
+    decimation = 4
+    episode_length_s = 20.0
     # - spaces definition
-    action_space = 1
-    observation_space = 4
+    action_space = 12
+    observation_space = 48
     state_space = 0
 
     # simulation
-    sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
+    sim: SimulationCfg = SimulationCfg(dt=1 / 200, render_interval=decimation)
 
     # scene
     scene: AnymaltrainingSceneCfg = AnymaltrainingSceneCfg(
@@ -46,18 +46,18 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
         clone_in_fabric=True,
     )
 
-    # custom parameters/scales
-    # - controllable joint
-    cart_dof_name = "slider_to_cart"
-    pole_dof_name = "cart_to_pole"
-    # - action scale
-    action_scale = 100.0  # [N]
-    # - reward scales
-    rew_scale_alive = 1.0
-    rew_scale_terminated = -2.0
-    rew_scale_pole_pos = -1.0
-    rew_scale_cart_vel = -0.01
-    rew_scale_pole_vel = -0.005
-    # - reset states/conditions
-    initial_pole_angle_range = [-0.25, 0.25]  # pole angle sample range on reset [rad]
-    max_cart_pos = 3.0  # reset if cart exceeds this position [m]
+    # Joint-position commands are offsets from ANYmal's default standing pose.
+    action_scale = 0.5  # [rad]
+    target_base_height = 0.6  # [m]
+    min_base_height = 0.35  # [m]
+    max_base_tilt = 0.7  # norm of projected gravity in the base x-y plane
+
+    # Standing reward scales.
+    height_reward_scale = 2.0
+    upright_reward_scale = 2.0
+    joint_pose_reward_scale = 1.0
+    linear_velocity_penalty_scale = -1.0
+    angular_velocity_penalty_scale = -0.2
+    action_rate_penalty_scale = -0.05
+    torque_penalty_scale = -2.0e-5
+    termination_penalty_scale = -2.0

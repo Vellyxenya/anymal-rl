@@ -12,6 +12,49 @@ It allows you to develop in an isolated environment, outside of the core Isaac L
 
 **Keywords:** extension, template, isaaclab
 
+## Common commands
+
+Run these commands from the repository root in PowerShell.
+
+### Train with RSL-RL PPO
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --headless
+```
+
+### Play the latest trained policy
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Direct-v0 --viz kit --num_envs 1 --real-time
+```
+
+To play a particular model instead, append its full path:
+
+```powershell
+--checkpoint "C:\path\to\model_150.pt"
+```
+
+### Launch TensorBoard
+
+```powershell
+isaaclab -p -m tensorboard.main --logdir .\logs\rsl_rl\anymal_training_direct
+```
+
+Then open <http://localhost:6006> in a browser.
+
+### Environment smoke tests
+
+```powershell
+# Display ANYmal in its default standing pose.
+isaaclab -p .\scripts\zero_agent.py --task AnymalTraining-Direct-v0 --num_envs 1 --viz kit
+
+# Apply random joint actions (falling is expected).
+isaaclab -p .\scripts\random_agent.py --task AnymalTraining-Direct-v0 --num_envs 1 --viz kit
+
+# Confirm that the task is registered.
+isaaclab -p .\scripts\list_envs.py
+```
+
 ## Installation
 
 - Install Isaac Lab by following the [installation guide](https://isaac-sim.github.io/IsaacLab/main/source/setup/installation/index.html).

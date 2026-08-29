@@ -13,7 +13,7 @@ from . import agents
 
 
 gym.register(
-    id="Template-Anymaltraining-Direct-v0",
+    id="AnymalTraining-Direct-v0",
     entry_point=f"{__name__}.anymaltraining_env:AnymaltrainingEnv",
     disable_env_checker=True,
     kwargs={

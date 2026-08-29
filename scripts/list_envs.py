@@ -9,8 +9,7 @@ Script to print all the available environments in Isaac Lab.
 The script iterates over all registered environments and stores the details in a table.
 It prints the name of the environment, the entry point and the config file.
 
-All the environments are registered in the `AnymalTraining` extension. They start
-with `Isaac` in their name.
+All the environments are registered in the `AnymalTraining` extension.
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -86,7 +85,7 @@ def main():
     task_specs = [
         spec
         for spec in gym.registry.values()
-        if "Template-" in spec.id and (args_cli.keyword is None or args_cli.keyword in spec.id)
+        if "AnymalTraining-" in spec.id and (args_cli.keyword is None or args_cli.keyword in spec.id)
     ]
 
     if args_cli.show_presets:
