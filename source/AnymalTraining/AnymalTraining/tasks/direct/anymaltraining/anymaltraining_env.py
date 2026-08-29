@@ -27,8 +27,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         action_dim = gym.spaces.flatdim(self.single_action_space)
         self.actions = torch.zeros(self.num_envs, action_dim, device=self.device)
         self.previous_actions = torch.zeros_like(self.actions)
-        # Kept at zero for now; these slots make the observation layout compatible
-        # with the standard ANYmal locomotion task that we will build next.
+        # Desired body-frame [forward velocity, lateral velocity, yaw rate].
         self.commands = torch.zeros(self.num_envs, 3, device=self.device)
         self.command_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._sample_commands()
@@ -47,8 +46,8 @@ class AnymaltrainingEnv(DirectRLEnv):
                 "base_height",
                 "upright",
                 "joint_pose",
-                "forward_velocity",
-                "lateral_velocity",
+                "planar_velocity",
+                "yaw_velocity",
                 "vertical_velocity",
                 "angular_velocity",
                 "action_rate",
@@ -62,7 +61,16 @@ class AnymaltrainingEnv(DirectRLEnv):
         }
         self.episode_metric_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
-            for name in ("command_forward_velocity", "current_forward_velocity", "forward_velocity_error")
+            for name in (
+                "command_vx",
+                "current_vx",
+                "command_vy",
+                "current_vy",
+                "command_yaw_rate",
+                "current_yaw_rate",
+                "planar_velocity_error",
+                "yaw_rate_error",
+            )
         }
         self.episode_step_count = torch.zeros(self.num_envs, device=self.device)
 
@@ -108,15 +116,17 @@ class AnymaltrainingEnv(DirectRLEnv):
         joint_pose_error = torch.mean(
             torch.square(self.robot.data.joint_pos.torch - self.robot.data.default_joint_pos.torch), dim=1
         )
-        forward_velocity_error = torch.square(
-            self.commands[:, 0] - self.robot.data.root_lin_vel_b.torch[:, 0]
+        planar_velocity_error = torch.sum(
+            torch.square(self.commands[:, :2] - self.robot.data.root_lin_vel_b.torch[:, :2]), dim=1
         )
-        lateral_velocity_error = torch.square(self.robot.data.root_lin_vel_b.torch[:, 1])
+        yaw_velocity_error = torch.square(self.commands[:, 2] - self.robot.data.root_ang_vel_b.torch[:, 2])
         vertical_velocity_error = torch.square(self.robot.data.root_lin_vel_b.torch[:, 2])
-        angular_velocity_error = torch.sum(torch.square(self.robot.data.root_ang_vel_b.torch), dim=1)
+        angular_velocity_error = torch.sum(torch.square(self.robot.data.root_ang_vel_b.torch[:, :2]), dim=1)
         action_rate_error = torch.mean(torch.square(self.actions - self.previous_actions), dim=1)
         torque_error = torch.mean(torch.square(self.robot.data.applied_torque.torch), dim=1)
-        is_moving_command = self.commands[:, 0] > 0.1
+        is_moving_command = (torch.linalg.vector_norm(self.commands[:, :2], dim=1) > 0.1) | (
+            torch.abs(self.commands[:, 2]) > 0.1
+        )
 
         first_contact = self.contact_sensor.compute_first_contact(self.step_dt).torch[:, self.feet_sensor_ids]
         last_air_time = self.contact_sensor.data.last_air_time.torch[:, self.feet_sensor_ids]
@@ -143,13 +153,13 @@ class AnymaltrainingEnv(DirectRLEnv):
             "base_height": self.cfg.height_reward_scale * torch.exp(-base_height_error / 0.01) * self.step_dt,
             "upright": self.cfg.upright_reward_scale * torch.exp(-tilt_error / 0.1) * self.step_dt,
             "joint_pose": self.cfg.joint_pose_reward_scale * torch.exp(-joint_pose_error / 0.25) * self.step_dt,
-            "forward_velocity": (
-                self.cfg.forward_velocity_reward_scale
-                * torch.exp(-forward_velocity_error / 0.25)
+            "planar_velocity": (
+                self.cfg.planar_velocity_reward_scale
+                * torch.exp(-planar_velocity_error / 0.25)
                 * self.step_dt
             ),
-            "lateral_velocity": (
-                self.cfg.lateral_velocity_penalty_scale * lateral_velocity_error * self.step_dt
+            "yaw_velocity": (
+                self.cfg.yaw_velocity_reward_scale * torch.exp(-yaw_velocity_error / 0.25) * self.step_dt
             ),
             "vertical_velocity": (
                 self.cfg.vertical_velocity_penalty_scale * vertical_velocity_error * self.step_dt
@@ -166,12 +176,18 @@ class AnymaltrainingEnv(DirectRLEnv):
 
         for name, value in rewards.items():
             self.episode_reward_sums[name] += value
-        current_forward_velocity = self.robot.data.root_lin_vel_b.torch[:, 0]
-        self.episode_metric_sums["command_forward_velocity"] += self.commands[:, 0]
-        self.episode_metric_sums["current_forward_velocity"] += current_forward_velocity
-        self.episode_metric_sums["forward_velocity_error"] += torch.abs(
-            self.commands[:, 0] - current_forward_velocity
+        current_linear_velocity = self.robot.data.root_lin_vel_b.torch[:, :2]
+        current_yaw_rate = self.robot.data.root_ang_vel_b.torch[:, 2]
+        self.episode_metric_sums["command_vx"] += self.commands[:, 0]
+        self.episode_metric_sums["current_vx"] += current_linear_velocity[:, 0]
+        self.episode_metric_sums["command_vy"] += self.commands[:, 1]
+        self.episode_metric_sums["current_vy"] += current_linear_velocity[:, 1]
+        self.episode_metric_sums["command_yaw_rate"] += self.commands[:, 2]
+        self.episode_metric_sums["current_yaw_rate"] += current_yaw_rate
+        self.episode_metric_sums["planar_velocity_error"] += torch.linalg.vector_norm(
+            self.commands[:, :2] - current_linear_velocity, dim=1
         )
+        self.episode_metric_sums["yaw_rate_error"] += torch.abs(self.commands[:, 2] - current_yaw_rate)
         self.episode_step_count += 1.0
         return torch.stack(tuple(rewards.values())).sum(dim=0)
 
@@ -269,20 +285,28 @@ class AnymaltrainingEnv(DirectRLEnv):
         )
 
     def _update_commands(self) -> None:
-        """Resample expired forward-speed commands."""
+        """Resample expired planar velocity commands."""
         self.command_countdown -= 1
         env_ids = torch.nonzero(self.command_countdown <= 0, as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
             self._sample_commands(env_ids)
 
     def _sample_commands(self, env_ids: Sequence[int] | None = None) -> None:
-        """Sample forward commands and their durations; lateral and yaw commands stay zero."""
+        """Sample planar velocity commands and preserve a subset of standing commands."""
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, device=self.device)
         self.commands[env_ids] = 0.0
         self.commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(
             self.cfg.forward_velocity_range[0], self.cfg.forward_velocity_range[1]
         )
+        self.commands[env_ids, 1] = torch.empty(len(env_ids), device=self.device).uniform_(
+            self.cfg.lateral_velocity_range[0], self.cfg.lateral_velocity_range[1]
+        )
+        self.commands[env_ids, 2] = torch.empty(len(env_ids), device=self.device).uniform_(
+            self.cfg.yaw_velocity_range[0], self.cfg.yaw_velocity_range[1]
+        )
+        standing_mask = torch.rand(len(env_ids), device=self.device) < self.cfg.standing_command_probability
+        self.commands[env_ids[standing_mask]] = 0.0
         min_steps = int(self.cfg.command_resample_range_s[0] / self.step_dt)
         max_steps = int(self.cfg.command_resample_range_s[1] / self.step_dt)
         self.command_countdown[env_ids] = torch.randint(
