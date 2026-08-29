@@ -36,6 +36,10 @@ class AnymaltrainingEnv(DirectRLEnv):
         self._sample_push_intervals()
         self.feet_sensor_ids, _ = self.contact_sensor.find_sensors(".*FOOT")
         self.feet_body_ids, _ = self.robot.find_bodies(".*FOOT")
+        self.left_front_foot_id = self.contact_sensor.find_sensors("LF_FOOT")[0][0]
+        self.right_front_foot_id = self.contact_sensor.find_sensors("RF_FOOT")[0][0]
+        self.left_hind_foot_id = self.contact_sensor.find_sensors("LH_FOOT")[0][0]
+        self.right_hind_foot_id = self.contact_sensor.find_sensors("RH_FOOT")[0][0]
 
         self.episode_reward_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
@@ -52,9 +56,15 @@ class AnymaltrainingEnv(DirectRLEnv):
                 "feet_air_time",
                 "foot_clearance",
                 "feet_slide",
+                "trot_gait",
                 "termination",
             )
         }
+        self.episode_metric_sums = {
+            name: torch.zeros(self.num_envs, device=self.device)
+            for name in ("command_forward_velocity", "current_forward_velocity", "forward_velocity_error")
+        }
+        self.episode_step_count = torch.zeros(self.num_envs, device=self.device)
 
         if self.sim.visualizers:
             self.set_debug_vis(True)
@@ -127,6 +137,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         contact_forces = self.contact_sensor.data.net_forces_w_history.torch[:, :, self.feet_sensor_ids]
         feet_in_contact = torch.max(torch.linalg.vector_norm(contact_forces, dim=-1), dim=1)[0] > 1.0
         feet_slide = torch.sum(feet_horizontal_speed * feet_in_contact, dim=1)
+        trot_gait = self._compute_trot_gait_reward() * is_moving_command
 
         rewards = {
             "base_height": self.cfg.height_reward_scale * torch.exp(-base_height_error / 0.01) * self.step_dt,
@@ -149,11 +160,19 @@ class AnymaltrainingEnv(DirectRLEnv):
             "feet_air_time": self.cfg.feet_air_time_reward_scale * feet_air_time * self.step_dt,
             "foot_clearance": self.cfg.foot_clearance_reward_scale * foot_clearance * self.step_dt,
             "feet_slide": self.cfg.feet_slide_penalty_scale * feet_slide * self.step_dt,
+            "trot_gait": self.cfg.gait_reward_scale * trot_gait * self.step_dt,
             "termination": self.cfg.termination_penalty_scale * self.reset_terminated.float(),
         }
 
         for name, value in rewards.items():
             self.episode_reward_sums[name] += value
+        current_forward_velocity = self.robot.data.root_lin_vel_b.torch[:, 0]
+        self.episode_metric_sums["command_forward_velocity"] += self.commands[:, 0]
+        self.episode_metric_sums["current_forward_velocity"] += current_forward_velocity
+        self.episode_metric_sums["forward_velocity_error"] += torch.abs(
+            self.commands[:, 0] - current_forward_velocity
+        )
+        self.episode_step_count += 1.0
         return torch.stack(tuple(rewards.values())).sum(dim=0)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -174,6 +193,11 @@ class AnymaltrainingEnv(DirectRLEnv):
         for name, episodic_sum in self.episode_reward_sums.items():
             self.extras["log"][f"Episode_Reward/{name}"] = torch.mean(episodic_sum[env_ids]).item()
             episodic_sum[env_ids] = 0.0
+        episode_steps = self.episode_step_count[env_ids].clamp_min(1.0)
+        for name, episodic_sum in self.episode_metric_sums.items():
+            self.extras["log"][f"Metrics/{name}"] = torch.mean(episodic_sum[env_ids] / episode_steps).item()
+            episodic_sum[env_ids] = 0.0
+        self.episode_step_count[env_ids] = 0.0
         self.extras["log"]["Episode_Termination/fall"] = torch.count_nonzero(
             self.reset_terminated[env_ids]
         ).item()
@@ -264,6 +288,43 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.command_countdown[env_ids] = torch.randint(
             min_steps, max_steps + 1, (len(env_ids),), device=self.device
         )
+
+    def _compute_trot_gait_reward(self) -> torch.Tensor:
+        """Reward synchronized diagonal feet and alternating diagonal pairs."""
+        first_pair = (self.left_front_foot_id, self.right_hind_foot_id)
+        second_pair = (self.right_front_foot_id, self.left_hind_foot_id)
+        sync_reward = self._feet_sync_reward(*first_pair) * self._feet_sync_reward(*second_pair)
+        async_reward = (
+            self._feet_async_reward(first_pair[0], second_pair[0])
+            * self._feet_async_reward(first_pair[0], second_pair[1])
+            * self._feet_async_reward(first_pair[1], second_pair[0])
+            * self._feet_async_reward(first_pair[1], second_pair[1])
+        )
+        return sync_reward * async_reward
+
+    def _feet_sync_reward(self, foot_0: int, foot_1: int) -> torch.Tensor:
+        """Measure whether two feet share the same contact/air phase."""
+        air_time = self.contact_sensor.data.current_air_time.torch
+        contact_time = self.contact_sensor.data.current_contact_time.torch
+        max_error_squared = self.cfg.gait_max_error**2
+        air_error = torch.clamp(torch.square(air_time[:, foot_0] - air_time[:, foot_1]), max=max_error_squared)
+        contact_error = torch.clamp(
+            torch.square(contact_time[:, foot_0] - contact_time[:, foot_1]), max=max_error_squared
+        )
+        return torch.exp(-(air_error + contact_error) / self.cfg.gait_reward_std)
+
+    def _feet_async_reward(self, foot_0: int, foot_1: int) -> torch.Tensor:
+        """Measure whether two feet occupy opposite contact/air phases."""
+        air_time = self.contact_sensor.data.current_air_time.torch
+        contact_time = self.contact_sensor.data.current_contact_time.torch
+        max_error_squared = self.cfg.gait_max_error**2
+        phase_error_0 = torch.clamp(
+            torch.square(air_time[:, foot_0] - contact_time[:, foot_1]), max=max_error_squared
+        )
+        phase_error_1 = torch.clamp(
+            torch.square(contact_time[:, foot_0] - air_time[:, foot_1]), max=max_error_squared
+        )
+        return torch.exp(-(phase_error_0 + phase_error_1) / self.cfg.gait_reward_std)
 
     def _set_debug_vis_impl(self, debug_vis: bool) -> None:
         """Create and toggle desired/current velocity arrows."""

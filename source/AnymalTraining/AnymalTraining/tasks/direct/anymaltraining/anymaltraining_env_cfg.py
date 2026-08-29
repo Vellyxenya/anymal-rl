@@ -69,7 +69,10 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     termination_penalty_scale = -2.0
     feet_air_time_reward_scale = 0.5
     foot_clearance_reward_scale = 0.25
-    feet_slide_penalty_scale = -0.1
+    feet_slide_penalty_scale = -0.2
+    gait_reward_scale = 1.0
+    gait_reward_std = 0.1
+    gait_max_error = 0.3  # [s]
     feet_air_time_threshold = 0.3  # [s]
     target_foot_clearance = 0.08  # [m]
 
@@ -85,5 +88,5 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     max_push_velocity = 0.5  # [m/s]
 
     # Forward-velocity commands.
-    forward_velocity_range = (0.0, 1.0)  # [m/s]
+    forward_velocity_range = (0.0, 2.0)  # [m/s]
     command_resample_range_s = (5.0, 10.0)

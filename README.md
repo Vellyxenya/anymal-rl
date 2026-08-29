@@ -34,6 +34,12 @@ To play a particular model instead, append its full path:
 --checkpoint "C:\path\to\model_150.pt"
 ```
 
+### Continue training from a checkpoint
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --load_run 2026-08-29_17-42-40 --checkpoint model_999.pt --headless --resume
+```
+
 ### Launch TensorBoard
 
 ```powershell
