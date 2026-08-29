@@ -11,6 +11,7 @@ import gymnasium as gym
 import torch
 
 from isaaclab.envs import DirectRLEnv
+from isaaclab.utils.math import quat_from_euler_xyz, quat_mul
 
 from .anymaltraining_env_cfg import AnymaltrainingEnvCfg
 
@@ -130,6 +131,29 @@ class AnymaltrainingEnv(DirectRLEnv):
         joint_vel = self.robot.data.default_joint_vel.torch[env_ids].clone()
         root_pose = self.robot.data.default_root_pose.torch[env_ids].clone()
         root_vel = self.robot.data.default_root_vel.torch[env_ids].clone()
+
+        joint_pos += torch.empty_like(joint_pos).uniform_(
+            -self.cfg.initial_joint_position_noise, self.cfg.initial_joint_position_noise
+        )
+        joint_vel.uniform_(-self.cfg.initial_joint_velocity_noise, self.cfg.initial_joint_velocity_noise)
+
+        num_resets = len(env_ids)
+        roll = torch.empty(num_resets, device=self.device).uniform_(
+            -self.cfg.initial_base_tilt, self.cfg.initial_base_tilt
+        )
+        pitch = torch.empty(num_resets, device=self.device).uniform_(
+            -self.cfg.initial_base_tilt, self.cfg.initial_base_tilt
+        )
+        yaw = torch.zeros(num_resets, device=self.device)
+        orientation_noise = quat_from_euler_xyz(roll, pitch, yaw)
+        root_pose[:, 3:7] = quat_mul(orientation_noise, root_pose[:, 3:7])
+
+        root_vel[:, :3].uniform_(
+            -self.cfg.initial_base_linear_velocity, self.cfg.initial_base_linear_velocity
+        )
+        root_vel[:, 3:].uniform_(
+            -self.cfg.initial_base_angular_velocity, self.cfg.initial_base_angular_velocity
+        )
         root_pose[:, :3] += self.scene.env_origins[env_ids]
 
         self.robot.write_root_pose_to_sim_index(root_pose=root_pose, env_ids=env_ids)

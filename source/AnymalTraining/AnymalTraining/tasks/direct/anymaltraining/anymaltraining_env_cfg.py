@@ -61,3 +61,10 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     action_rate_penalty_scale = -0.05
     torque_penalty_scale = -2.0e-5
     termination_penalty_scale = -2.0
+
+    # Reset randomization for standing recovery.
+    initial_joint_position_noise = 0.1  # [rad]
+    initial_joint_velocity_noise = 0.1  # [rad/s]
+    initial_base_tilt = 0.087  # [rad], approximately 5 degrees
+    initial_base_linear_velocity = 0.1  # [m/s]
+    initial_base_angular_velocity = 0.1  # [rad/s]
