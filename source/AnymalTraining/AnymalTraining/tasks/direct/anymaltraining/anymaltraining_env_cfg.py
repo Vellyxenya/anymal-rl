@@ -68,3 +68,7 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     initial_base_tilt = 0.087  # [rad], approximately 5 degrees
     initial_base_linear_velocity = 0.1  # [m/s]
     initial_base_angular_velocity = 0.1  # [rad/s]
+
+    # Horizontal velocity impulses applied independently during each episode.
+    push_interval_range_s = (2.0, 5.0)
+    max_push_velocity = 0.5  # [m/s]

@@ -28,6 +28,8 @@ class AnymaltrainingEnv(DirectRLEnv):
         # Kept at zero for now; these slots make the observation layout compatible
         # with the standard ANYmal locomotion task that we will build next.
         self.commands = torch.zeros(self.num_envs, 3, device=self.device)
+        self.push_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        self._sample_push_intervals()
 
         self.episode_reward_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
@@ -49,6 +51,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.robot = self.scene["robot"]
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        self._apply_random_pushes()
         self.previous_actions.copy_(self.actions)
         self.actions = actions.clone()
         self.processed_actions = self.robot.data.default_joint_pos.torch + self.cfg.action_scale * self.actions
@@ -160,3 +163,28 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.robot.write_root_velocity_to_sim_index(root_velocity=root_vel, env_ids=env_ids)
         self.robot.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
         self.robot.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
+        self._sample_push_intervals(env_ids)
+
+    def _apply_random_pushes(self) -> None:
+        """Apply independent horizontal velocity impulses at randomized intervals."""
+        self.push_countdown -= 1
+        push_env_ids = torch.nonzero(self.push_countdown <= 0, as_tuple=False).squeeze(-1)
+        if len(push_env_ids) == 0:
+            return
+
+        root_velocity = self.robot.data.root_vel_w.torch[push_env_ids].clone()
+        root_velocity[:, :2] += torch.empty_like(root_velocity[:, :2]).uniform_(
+            -self.cfg.max_push_velocity, self.cfg.max_push_velocity
+        )
+        self.robot.write_root_velocity_to_sim_index(root_velocity=root_velocity, env_ids=push_env_ids)
+        self._sample_push_intervals(push_env_ids)
+
+    def _sample_push_intervals(self, env_ids: Sequence[int] | None = None) -> None:
+        """Choose the number of policy steps until each environment's next push."""
+        if env_ids is None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+        min_steps = int(self.cfg.push_interval_range_s[0] / self.step_dt)
+        max_steps = int(self.cfg.push_interval_range_s[1] / self.step_dt)
+        self.push_countdown[env_ids] = torch.randint(
+            min_steps, max_steps + 1, (len(env_ids),), device=self.device
+        )
