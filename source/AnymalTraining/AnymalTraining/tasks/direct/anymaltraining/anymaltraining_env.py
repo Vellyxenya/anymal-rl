@@ -34,6 +34,8 @@ class AnymaltrainingEnv(DirectRLEnv):
         self._sample_commands()
         self.push_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._sample_push_intervals()
+        self.feet_sensor_ids, _ = self.contact_sensor.find_sensors(".*FOOT")
+        self.feet_body_ids, _ = self.robot.find_bodies(".*FOOT")
 
         self.episode_reward_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
@@ -47,6 +49,9 @@ class AnymaltrainingEnv(DirectRLEnv):
                 "angular_velocity",
                 "action_rate",
                 "torque",
+                "feet_air_time",
+                "foot_clearance",
+                "feet_slide",
                 "termination",
             )
         }
@@ -58,6 +63,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         # The scene configuration creates and clones the articulation through the
         # template-based path required for effective PhysX joint actuation.
         self.robot = self.scene["robot"]
+        self.contact_sensor = self.scene["contact_sensor"]
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._apply_random_pushes()
@@ -100,6 +106,27 @@ class AnymaltrainingEnv(DirectRLEnv):
         angular_velocity_error = torch.sum(torch.square(self.robot.data.root_ang_vel_b.torch), dim=1)
         action_rate_error = torch.mean(torch.square(self.actions - self.previous_actions), dim=1)
         torque_error = torch.mean(torch.square(self.robot.data.applied_torque.torch), dim=1)
+        is_moving_command = self.commands[:, 0] > 0.1
+
+        first_contact = self.contact_sensor.compute_first_contact(self.step_dt).torch[:, self.feet_sensor_ids]
+        last_air_time = self.contact_sensor.data.last_air_time.torch[:, self.feet_sensor_ids]
+        feet_air_time = torch.sum(
+            (last_air_time - self.cfg.feet_air_time_threshold) * first_contact, dim=1
+        ) * is_moving_command
+
+        feet_height = self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2]
+        feet_horizontal_speed = torch.linalg.vector_norm(
+            self.robot.data.body_lin_vel_w.torch[:, self.feet_body_ids, :2], dim=2
+        )
+        foot_clearance = torch.sum(
+            torch.exp(-torch.square(feet_height - self.cfg.target_foot_clearance) / 0.0025)
+            * torch.tanh(2.0 * feet_horizontal_speed),
+            dim=1,
+        ) * is_moving_command
+
+        contact_forces = self.contact_sensor.data.net_forces_w_history.torch[:, :, self.feet_sensor_ids]
+        feet_in_contact = torch.max(torch.linalg.vector_norm(contact_forces, dim=-1), dim=1)[0] > 1.0
+        feet_slide = torch.sum(feet_horizontal_speed * feet_in_contact, dim=1)
 
         rewards = {
             "base_height": self.cfg.height_reward_scale * torch.exp(-base_height_error / 0.01) * self.step_dt,
@@ -119,6 +146,9 @@ class AnymaltrainingEnv(DirectRLEnv):
             "angular_velocity": self.cfg.angular_velocity_penalty_scale * angular_velocity_error * self.step_dt,
             "action_rate": self.cfg.action_rate_penalty_scale * action_rate_error * self.step_dt,
             "torque": self.cfg.torque_penalty_scale * torque_error * self.step_dt,
+            "feet_air_time": self.cfg.feet_air_time_reward_scale * feet_air_time * self.step_dt,
+            "foot_clearance": self.cfg.foot_clearance_reward_scale * foot_clearance * self.step_dt,
+            "feet_slide": self.cfg.feet_slide_penalty_scale * feet_slide * self.step_dt,
             "termination": self.cfg.termination_penalty_scale * self.reset_terminated.float(),
         }
 

@@ -7,6 +7,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
 
@@ -18,6 +19,9 @@ class AnymaltrainingSceneCfg(InteractiveSceneCfg):
     """Scene configuration using the template-based spawning path."""
 
     robot: ArticulationCfg = ANYMAL_C_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    contact_sensor = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, update_period=0.005, track_air_time=True
+    )
     ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
     light = AssetBaseCfg(
         prim_path="/World/Light",
@@ -63,6 +67,11 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     action_rate_penalty_scale = -0.05
     torque_penalty_scale = -2.0e-5
     termination_penalty_scale = -2.0
+    feet_air_time_reward_scale = 0.5
+    foot_clearance_reward_scale = 0.25
+    feet_slide_penalty_scale = -0.1
+    feet_air_time_threshold = 0.3  # [s]
+    target_foot_clearance = 0.08  # [m]
 
     # Reset randomization for standing recovery.
     initial_joint_position_noise = 0.1  # [rad]
