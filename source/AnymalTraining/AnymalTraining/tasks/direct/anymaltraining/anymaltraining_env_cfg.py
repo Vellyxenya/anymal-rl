@@ -3,13 +3,26 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-from isaaclab.assets import ArticulationCfg
+import isaaclab.sim as sim_utils
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils.configclass import configclass
 
 from isaaclab_assets.robots.cartpole import CARTPOLE_CFG
+
+
+@configclass
+class AnymaltrainingSceneCfg(InteractiveSceneCfg):
+    """Scene configuration using the template-based spawning path."""
+
+    robot: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+    ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
+    light = AssetBaseCfg(
+        prim_path="/World/Light",
+        spawn=sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75)),
+    )
 
 
 @configclass
@@ -25,11 +38,13 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     # simulation
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=decimation)
 
-    # robot(s)
-    robot_cfg: ArticulationCfg = CARTPOLE_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-
     # scene
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
+    scene: AnymaltrainingSceneCfg = AnymaltrainingSceneCfg(
+        num_envs=4096,
+        env_spacing=4.0,
+        replicate_physics=True,
+        clone_in_fabric=True,
+    )
 
     # custom parameters/scales
     # - controllable joint
