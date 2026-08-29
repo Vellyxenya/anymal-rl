@@ -5,10 +5,12 @@
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import DirectRLEnvCfg
+from isaaclab.envs import DirectRLEnvCfg, ViewerCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.sim import SimulationCfg
+from isaaclab.terrains import TerrainImporterCfg
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
 from isaaclab.utils.configclass import configclass
 
 from isaaclab_assets.robots.anymal import ANYMAL_C_CFG
@@ -22,7 +24,19 @@ class AnymaltrainingSceneCfg(InteractiveSceneCfg):
     contact_sensor = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, update_period=0.005, track_air_time=True
     )
-    ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg())
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="plane",
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
     light = AssetBaseCfg(
         prim_path="/World/Light",
         spawn=sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75)),
@@ -99,3 +113,60 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     manual_forward_velocity = 1.0  # [m/s]
     manual_lateral_velocity = 0.5  # [m/s]
     manual_yaw_velocity = 1.0  # [rad/s]
+
+    # Disabled for the flat task and enabled by the derived rough task.
+    terrain_curriculum = False
+    terrain_move_up_planar_error = 0.35  # [m/s], episode mean
+    terrain_move_up_yaw_error = 0.4  # [rad/s], episode mean
+    terrain_move_down_planar_error = 0.6  # [m/s], episode mean
+    terrain_move_down_yaw_error = 0.7  # [rad/s], episode mean
+    terrain_move_up_episode_fraction = 0.8
+
+    # Optional fixed rough-terrain selection for evaluation. Empty/-1 keeps training behavior.
+    evaluation_terrain_type = ""
+    evaluation_terrain_level = -1
+
+
+@configclass
+class AnymaltrainingRoughSceneCfg(AnymaltrainingSceneCfg):
+    """The flat scene with generated terrain and a base-mounted height scanner."""
+
+    terrain = TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="generator",
+        terrain_generator=ROUGH_TERRAINS_CFG.replace(curriculum=True),
+        max_init_terrain_level=2,
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            restitution=0.0,
+        ),
+        debug_vis=False,
+    )
+    height_scanner = RayCasterCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/base",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        mesh_prim_paths=["/World/ground"],
+        debug_vis=False,
+    )
+
+
+@configclass
+class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
+    """Rough-terrain variant sharing the dynamics, commands, rewards, and resets."""
+
+    # The 187 terrain-height samples are appended to the flat task's 48 observations.
+    observation_space = 235
+    viewer = ViewerCfg(eye=(3.5, 3.5, 2.5), lookat=(0.0, 0.0, 0.5), origin_type="env", env_index=0)
+    scene: AnymaltrainingRoughSceneCfg = AnymaltrainingRoughSceneCfg(
+        num_envs=4096,
+        env_spacing=4.0,
+        replicate_physics=True,
+        clone_in_fabric=True,
+    )
+    terrain_curriculum = True

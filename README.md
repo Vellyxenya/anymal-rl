@@ -19,7 +19,13 @@ Run these commands from the repository root in PowerShell.
 ### Train with RSL-RL PPO
 
 ```powershell
-isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --headless
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --viz none
+```
+
+Train the separate rough-terrain policy from scratch:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Rough-Direct-v0 --viz none
 ```
 
 ### Play the latest trained policy
@@ -36,6 +42,22 @@ isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Direct-v0 --viz kit -
 
 Use Up/Down for forward/backward, Left/Right for lateral motion, Z/X for turning, and L to stop.
 
+Play the rough-terrain policy (append `--checkpoint` if needed):
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Rough-Direct-v0 --viz kit --num_envs 1 --real-time
+```
+
+Lock play to a particular terrain family and difficulty level (0 is easiest, 9 is hardest):
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Rough-Direct-v0 --viz kit --num_envs 1 --real-time env.manual_commands=true env.evaluation_terrain_type=boxes env.evaluation_terrain_level=5
+```
+
+Valid terrain families are `pyramid_stairs`, `pyramid_stairs_inv`, `boxes`, `random_rough`,
+`hf_pyramid_slope`, and `hf_pyramid_slope_inv`. The rough-task camera is relative to environment 0,
+so it focuses on the selected patch instead of the center of the complete terrain grid.
+
 To play a particular model instead, append its full path:
 
 ```powershell
@@ -45,7 +67,7 @@ To play a particular model instead, append its full path:
 ### Continue training from a checkpoint
 
 ```powershell
-isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --load_run 2026-08-29_17-42-40 --checkpoint model_999.pt --headless --resume
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --load_run 2026-08-29_17-42-40 --checkpoint model_999.pt --viz none --resume
 ```
 
 ### Launch TensorBoard
@@ -53,6 +75,8 @@ isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --load_run
 ```powershell
 isaaclab -p -m tensorboard.main --logdir .\logs\rsl_rl\anymal_training_direct
 ```
+
+For rough-terrain runs, use `--logdir .\logs\rsl_rl\anymal_training_rough_direct`.
 
 Then open <http://localhost:6006> in a browser.
 

@@ -88,6 +88,7 @@ class AnymaltrainingEnv(DirectRLEnv):
             )
         }
         self.episode_step_count = torch.zeros(self.num_envs, device=self.device)
+        self._configure_evaluation_terrain()
 
         if self.sim.visualizers:
             self.set_debug_vis(True)
@@ -97,6 +98,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         # template-based path required for effective PhysX joint actuation.
         self.robot = self.scene["robot"]
         self.contact_sensor = self.scene["contact_sensor"]
+        self.height_scanner = self.scene.sensors.get("height_scanner")
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         self._apply_random_pushes()
@@ -109,24 +111,27 @@ class AnymaltrainingEnv(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         self._update_commands()
-        obs = torch.cat(
-            (
-                self.robot.data.root_lin_vel_b.torch,
-                self.robot.data.root_ang_vel_b.torch,
-                self.robot.data.projected_gravity_b.torch,
-                self.commands,
-                self.robot.data.joint_pos.torch - self.robot.data.default_joint_pos.torch,
-                self.robot.data.joint_vel.torch,
-                self.actions,
-            ),
-            dim=-1,
-        )
+        observations = [
+            self.robot.data.root_lin_vel_b.torch,
+            self.robot.data.root_ang_vel_b.torch,
+            self.robot.data.projected_gravity_b.torch,
+            self.commands,
+            self.robot.data.joint_pos.torch - self.robot.data.default_joint_pos.torch,
+            self.robot.data.joint_vel.torch,
+        ]
+        if self.height_scanner is not None:
+            terrain_heights = (
+                self.height_scanner.data.pos_w.torch[:, 2].unsqueeze(1)
+                - self.height_scanner.data.ray_hits_w.torch[..., 2]
+                - self.cfg.target_base_height
+            ).clip(-1.0, 1.0)
+            observations.append(terrain_heights)
+        observations.append(self.actions)
+        obs = torch.cat(observations, dim=-1)
         return {"policy": obs}
 
     def _get_rewards(self) -> torch.Tensor:
-        base_height_error = torch.square(
-            self.robot.data.root_pos_w.torch[:, 2] - self.cfg.target_base_height
-        )
+        base_height_error = torch.square(self._base_height_above_terrain() - self.cfg.target_base_height)
         tilt_error = torch.sum(torch.square(self.robot.data.projected_gravity_b.torch[:, :2]), dim=1)
         joint_pose_error = torch.mean(
             torch.square(self.robot.data.joint_pos.torch - self.robot.data.default_joint_pos.torch), dim=1
@@ -149,7 +154,10 @@ class AnymaltrainingEnv(DirectRLEnv):
             (last_air_time - self.cfg.feet_air_time_threshold) * first_contact, dim=1
         ) * is_moving_command
 
-        feet_height = self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2]
+        feet_height = (
+            self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2]
+            - self.scene.env_origins[:, 2].unsqueeze(1)
+        )
         feet_horizontal_speed = torch.linalg.vector_norm(
             self.robot.data.body_lin_vel_w.torch[:, self.feet_body_ids, :2], dim=2
         )
@@ -208,7 +216,7 @@ class AnymaltrainingEnv(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
-        too_low = self.robot.data.root_pos_w.torch[:, 2] < self.cfg.min_base_height
+        too_low = self._base_height_above_terrain() < self.cfg.min_base_height
         base_tilt = torch.linalg.vector_norm(self.robot.data.projected_gravity_b.torch[:, :2], dim=1)
         too_tilted = base_tilt > self.cfg.max_base_tilt
         fell = too_low | too_tilted
@@ -217,6 +225,7 @@ class AnymaltrainingEnv(DirectRLEnv):
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None:
             env_ids = self.robot._ALL_INDICES
+        self._update_terrain_curriculum(env_ids)
         self.robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
@@ -235,6 +244,10 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.extras["log"]["Episode_Termination/time_out"] = torch.count_nonzero(
             self.reset_time_outs[env_ids]
         ).item()
+        if self.cfg.terrain_curriculum:
+            terrain_levels = self.scene.terrain.terrain_levels.float()
+            self.extras["log"]["Curriculum/terrain_level_mean"] = torch.mean(terrain_levels).item()
+            self.extras["log"]["Curriculum/terrain_level_max"] = torch.max(terrain_levels).item()
 
         self.actions[env_ids] = 0.0
         self.previous_actions[env_ids] = 0.0
@@ -274,6 +287,87 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.robot.write_joint_position_to_sim_index(position=joint_pos, env_ids=env_ids)
         self.robot.write_joint_velocity_to_sim_index(velocity=joint_vel, env_ids=env_ids)
         self._sample_push_intervals(env_ids)
+
+    def _base_height_above_terrain(self) -> torch.Tensor:
+        """Return base clearance using the center terrain ray when available."""
+        if self.height_scanner is None:
+            return self.robot.data.root_pos_w.torch[:, 2] - self.scene.env_origins[:, 2]
+        ray_hits_z = self.height_scanner.data.ray_hits_w.torch[..., 2]
+        center_ray = ray_hits_z.shape[1] // 2
+        return self.robot.data.root_pos_w.torch[:, 2] - ray_hits_z[:, center_ray]
+
+    def _update_terrain_curriculum(self, env_ids: Sequence[int]) -> None:
+        """Adjust difficulty using episode-wide command tracking and survival."""
+        if not self.cfg.terrain_curriculum or not hasattr(self, "episode_step_count"):
+            return
+        env_ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
+        env_ids = env_ids[self.episode_step_count[env_ids] > 0]
+        if len(env_ids) == 0:
+            return
+
+        episode_steps = self.episode_step_count[env_ids]
+        planar_error = self.episode_metric_sums["planar_velocity_error"][env_ids] / episode_steps
+        yaw_error = self.episode_metric_sums["yaw_rate_error"][env_ids] / episode_steps
+        survived_long_enough = episode_steps >= self.max_episode_length * self.cfg.terrain_move_up_episode_fraction
+
+        move_up = (
+            survived_long_enough
+            & (planar_error < self.cfg.terrain_move_up_planar_error)
+            & (yaw_error < self.cfg.terrain_move_up_yaw_error)
+        )
+        move_down = (
+            (planar_error > self.cfg.terrain_move_down_planar_error)
+            | (yaw_error > self.cfg.terrain_move_down_yaw_error)
+            | ~survived_long_enough
+        ) & ~move_up
+        self.scene.terrain.update_env_origins(env_ids, move_up, move_down)
+
+    def _configure_evaluation_terrain(self) -> None:
+        """Lock a single evaluation environment to a requested terrain family and level."""
+        terrain_name = self.cfg.evaluation_terrain_type
+        terrain_level = self.cfg.evaluation_terrain_level
+        if not terrain_name and terrain_level < 0:
+            return
+        if self.height_scanner is None:
+            raise ValueError("Fixed terrain selection is only available for the rough-terrain task.")
+        if self.num_envs != 1:
+            raise ValueError("Fixed terrain selection requires '--num_envs 1' to avoid overlapping robots.")
+
+        terrain = self.scene.terrain
+        if terrain_level >= 0:
+            if terrain_level >= terrain.max_terrain_level:
+                raise ValueError(
+                    f"evaluation_terrain_level must be between 0 and {terrain.max_terrain_level - 1}."
+                )
+            terrain.terrain_levels.fill_(terrain_level)
+
+        if terrain_name:
+            sub_terrains = terrain.cfg.terrain_generator.sub_terrains
+            if terrain_name not in sub_terrains:
+                available = ", ".join(sub_terrains)
+                raise ValueError(f"Unknown terrain type '{terrain_name}'. Available types: {available}.")
+            total_proportion = sum(cfg.proportion for cfg in sub_terrains.values())
+            cumulative_proportion = 0.0
+            selected_column = None
+            for name, sub_terrain_cfg in sub_terrains.items():
+                lower_bound = cumulative_proportion
+                cumulative_proportion += sub_terrain_cfg.proportion / total_proportion
+                if name == terrain_name:
+                    selected_column = next(
+                        column
+                        for column in range(terrain.cfg.terrain_generator.num_cols)
+                        if lower_bound <= column / terrain.cfg.terrain_generator.num_cols + 0.001 < cumulative_proportion
+                    )
+                    break
+            terrain.terrain_types.fill_(selected_column)
+
+        terrain.env_origins[:] = terrain.terrain_origins[terrain.terrain_levels, terrain.terrain_types]
+        self.cfg.terrain_curriculum = False
+        selected_name = terrain_name or "assigned"
+        print(
+            f"[INFO] Evaluation terrain locked to type='{selected_name}', "
+            f"level={terrain.terrain_levels[0].item()}."
+        )
 
     def _apply_random_pushes(self) -> None:
         """Apply independent horizontal velocity impulses at randomized intervals."""
