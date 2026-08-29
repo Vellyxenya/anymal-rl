@@ -55,8 +55,10 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     # Standing reward scales.
     height_reward_scale = 2.0
     upright_reward_scale = 2.0
-    joint_pose_reward_scale = 1.0
-    linear_velocity_penalty_scale = -1.0
+    joint_pose_reward_scale = 0.2
+    forward_velocity_reward_scale = 2.0
+    lateral_velocity_penalty_scale = -0.5
+    vertical_velocity_penalty_scale = -1.0
     angular_velocity_penalty_scale = -0.2
     action_rate_penalty_scale = -0.05
     torque_penalty_scale = -2.0e-5
@@ -72,3 +74,7 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     # Horizontal velocity impulses applied independently during each episode.
     push_interval_range_s = (2.0, 5.0)
     max_push_velocity = 0.5  # [m/s]
+
+    # Forward-velocity commands.
+    forward_velocity_range = (0.0, 1.0)  # [m/s]
+    command_resample_range_s = (5.0, 10.0)
