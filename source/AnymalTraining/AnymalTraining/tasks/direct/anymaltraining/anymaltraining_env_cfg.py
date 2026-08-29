@@ -93,3 +93,9 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     yaw_velocity_range = (-1.0, 1.0)  # [rad/s]
     standing_command_probability = 0.1
     command_resample_range_s = (5.0, 10.0)
+
+    # Interactive command input (disabled during training).
+    manual_commands = False
+    manual_forward_velocity = 1.0  # [m/s]
+    manual_lateral_velocity = 0.5  # [m/s]
+    manual_yaw_velocity = 1.0  # [rad/s]

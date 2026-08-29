@@ -10,6 +10,7 @@ from collections.abc import Sequence
 import gymnasium as gym
 import torch
 
+from isaaclab.devices import Se2Keyboard, Se2KeyboardCfg
 from isaaclab.envs import DirectRLEnv
 from isaaclab.markers import VisualizationMarkers
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
@@ -30,7 +31,21 @@ class AnymaltrainingEnv(DirectRLEnv):
         # Desired body-frame [forward velocity, lateral velocity, yaw rate].
         self.commands = torch.zeros(self.num_envs, 3, device=self.device)
         self.command_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        self._sample_commands()
+        self.keyboard = None
+        if self.cfg.manual_commands:
+            if not self.sim.visualizers:
+                raise RuntimeError("Manual commands require an interactive visualizer such as '--viz kit'.")
+            self.keyboard = Se2Keyboard(
+                Se2KeyboardCfg(
+                    v_x_sensitivity=self.cfg.manual_forward_velocity,
+                    v_y_sensitivity=self.cfg.manual_lateral_velocity,
+                    omega_z_sensitivity=self.cfg.manual_yaw_velocity,
+                    sim_device=self.device,
+                )
+            )
+            print(self.keyboard)
+        else:
+            self._sample_commands()
         self.push_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._sample_push_intervals()
         self.feet_sensor_ids, _ = self.contact_sensor.find_sensors(".*FOOT")
@@ -286,6 +301,9 @@ class AnymaltrainingEnv(DirectRLEnv):
 
     def _update_commands(self) -> None:
         """Resample expired planar velocity commands."""
+        if self.keyboard is not None:
+            self.commands[:] = self.keyboard.advance()
+            return
         self.command_countdown -= 1
         env_ids = torch.nonzero(self.command_countdown <= 0, as_tuple=False).squeeze(-1)
         if len(env_ids) > 0:
@@ -295,6 +313,9 @@ class AnymaltrainingEnv(DirectRLEnv):
         """Sample planar velocity commands and preserve a subset of standing commands."""
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, device=self.device)
+        if self.cfg.manual_commands:
+            self.commands[env_ids] = 0.0
+            return
         self.commands[env_ids] = 0.0
         self.commands[env_ids, 0] = torch.empty(len(env_ids), device=self.device).uniform_(
             self.cfg.forward_velocity_range[0], self.cfg.forward_velocity_range[1]

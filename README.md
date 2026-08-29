@@ -28,6 +28,14 @@ isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --headless
 isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Direct-v0 --viz kit --num_envs 1 --real-time
 ```
 
+For interactive keyboard commands:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Direct-v0 --viz kit --num_envs 1 --real-time env.manual_commands=true
+```
+
+Use Up/Down for forward/backward, Left/Right for lateral motion, Z/X for turning, and L to stop.
+
 To play a particular model instead, append its full path:
 
 ```powershell
