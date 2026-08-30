@@ -89,6 +89,11 @@ class AnymaltrainingEnv(DirectRLEnv):
         }
         self.episode_step_count = torch.zeros(self.num_envs, device=self.device)
         self._configure_evaluation_terrain()
+        self._pending_terrain_level_delta = 0
+        self._pending_terrain_type_delta = 0
+        self._pending_manual_reset = False
+        self._follow_camera = self.cfg.follow_camera
+        self._configure_evaluation_controls()
 
         if self.sim.visualizers:
             self.set_debug_vis(True)
@@ -101,6 +106,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.height_scanner = self.scene.sensors.get("height_scanner")
 
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
+        self._apply_pending_evaluation_change()
         self._apply_random_pushes()
         self.previous_actions.copy_(self.actions)
         self.actions = actions.clone()
@@ -369,6 +375,96 @@ class AnymaltrainingEnv(DirectRLEnv):
             f"level={terrain.terrain_levels[0].item()}."
         )
 
+    def _configure_evaluation_controls(self) -> None:
+        """Bind runtime terrain and camera controls for single-robot manual evaluation."""
+        if self.keyboard is None or self.height_scanner is None:
+            return
+        if self.num_envs != 1:
+            print("[WARN] Runtime terrain controls require '--num_envs 1'.")
+            return
+
+        # Keep evaluation deterministic: only the user changes the selected terrain.
+        self.cfg.terrain_curriculum = False
+        self.keyboard.add_callback("PAGE_UP", lambda: self._queue_terrain_change(level_delta=1))
+        self.keyboard.add_callback("PAGE_DOWN", lambda: self._queue_terrain_change(level_delta=-1))
+        self.keyboard.add_callback("M", lambda: self._queue_terrain_change(type_delta=1))
+        self.keyboard.add_callback("N", lambda: self._queue_terrain_change(type_delta=-1))
+        self.keyboard.add_callback("R", self._queue_manual_reset)
+        self.keyboard.add_callback("C", self._toggle_follow_camera)
+        print(
+            "[INFO] Evaluation controls: Page Up/Down=terrain level, N/M=terrain type, "
+            "R=reset, C=toggle follow camera."
+        )
+
+    def _terrain_family_columns(self) -> list[tuple[str, int]]:
+        """Return one representative generated-terrain column per configured family."""
+        generator_cfg = self.scene.terrain.cfg.terrain_generator
+        total_proportion = sum(cfg.proportion for cfg in generator_cfg.sub_terrains.values())
+        cumulative_proportion = 0.0
+        families = []
+        for name, sub_terrain_cfg in generator_cfg.sub_terrains.items():
+            lower_bound = cumulative_proportion
+            cumulative_proportion += sub_terrain_cfg.proportion / total_proportion
+            column = next(
+                index
+                for index in range(generator_cfg.num_cols)
+                if lower_bound <= index / generator_cfg.num_cols + 0.001 < cumulative_proportion
+            )
+            families.append((name, column))
+        return families
+
+    def _queue_terrain_change(self, level_delta: int = 0, type_delta: int = 0) -> None:
+        """Queue a terrain change from the Kit keyboard callback thread."""
+        self._pending_terrain_level_delta += level_delta
+        self._pending_terrain_type_delta += type_delta
+
+    def _queue_manual_reset(self) -> None:
+        """Queue a reset from the Kit keyboard callback thread."""
+        self._pending_manual_reset = True
+
+    def _apply_pending_evaluation_change(self) -> None:
+        """Apply queued UI changes on the simulation thread and reset the robot."""
+        if (
+            self._pending_terrain_level_delta == 0
+            and self._pending_terrain_type_delta == 0
+            and not self._pending_manual_reset
+        ):
+            return
+
+        terrain = self.scene.terrain
+        level = int(terrain.terrain_levels[0].item())
+        level = min(max(level + self._pending_terrain_level_delta, 0), terrain.max_terrain_level - 1)
+        terrain.terrain_levels.fill_(level)
+
+        families = self._terrain_family_columns()
+        current_column = int(terrain.terrain_types[0].item())
+        family_index = min(range(len(families)), key=lambda index: abs(families[index][1] - current_column))
+        family_index = (family_index + self._pending_terrain_type_delta) % len(families)
+        terrain_name, terrain_column = families[family_index]
+        terrain.terrain_types.fill_(terrain_column)
+        terrain.env_origins[:] = terrain.terrain_origins[terrain.terrain_levels, terrain.terrain_types]
+
+        self._pending_terrain_level_delta = 0
+        self._pending_terrain_type_delta = 0
+        self._pending_manual_reset = False
+        self._reset_idx(torch.tensor([0], device=self.device, dtype=torch.long))
+        self._update_follow_camera()
+        print(f"[INFO] Evaluation terrain: type='{terrain_name}', level={level}.")
+
+    def _toggle_follow_camera(self) -> None:
+        """Toggle the robot-follow camera from the Kit keyboard callback."""
+        self._follow_camera = not self._follow_camera
+        print(f"[INFO] Follow camera {'enabled' if self._follow_camera else 'disabled'}.")
+
+    def _update_follow_camera(self) -> None:
+        """Center the Kit camera on the single evaluated robot."""
+        if not self._follow_camera or self.num_envs != 1 or not self.sim.visualizers:
+            return
+        target = self.robot.data.root_pos_w.torch[0].detach().cpu()
+        target[2] += 0.35
+        eye = target + torch.tensor((-3.5, -3.5, 2.2))
+        self.sim.set_camera_view(tuple(eye.tolist()), tuple(target.tolist()))
+
     def _apply_random_pushes(self) -> None:
         """Apply independent horizontal velocity impulses at randomized intervals."""
         self.push_countdown -= 1
@@ -488,6 +584,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         """Draw velocity arrows above each robot."""
         if not self.robot.is_initialized:
             return
+        self._update_follow_camera()
         desired_position = self.robot.data.root_pos_w.torch.clone()
         current_position = desired_position.clone()
         desired_position[:, 2] += 0.7

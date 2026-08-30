@@ -58,6 +58,16 @@ Valid terrain families are `pyramid_stairs`, `pyramid_stairs_inv`, `boxes`, `ran
 `hf_pyramid_slope`, and `hf_pyramid_slope_inv`. The rough-task camera is relative to environment 0,
 so it focuses on the selected patch instead of the center of the complete terrain grid.
 
+While running rough-terrain play with `env.manual_commands=true` and `--num_envs 1`:
+
+- Page Up / Page Down: increase or decrease terrain difficulty.
+- N / M: select the previous or next terrain family.
+- R: reset ANYmal on the current terrain.
+- C: toggle the robot-follow camera so the viewport can be moved manually.
+
+Terrain changes are applied at the next simulation step and automatically reset the robot on the newly
+selected patch; the play script does not need to be restarted.
+
 To play a particular model instead, append its full path:
 
 ```powershell

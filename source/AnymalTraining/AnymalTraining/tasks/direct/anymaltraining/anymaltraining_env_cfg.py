@@ -5,7 +5,7 @@
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
-from isaaclab.envs import DirectRLEnvCfg, ViewerCfg
+from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.sim import SimulationCfg
@@ -125,6 +125,7 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     # Optional fixed rough-terrain selection for evaluation. Empty/-1 keeps training behavior.
     evaluation_terrain_type = ""
     evaluation_terrain_level = -1
+    follow_camera = True
 
 
 @configclass
@@ -162,7 +163,6 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
 
     # The 187 terrain-height samples are appended to the flat task's 48 observations.
     observation_space = 235
-    viewer = ViewerCfg(eye=(3.5, 3.5, 2.5), lookat=(0.0, 0.0, 0.5), origin_type="env", env_index=0)
     scene: AnymaltrainingRoughSceneCfg = AnymaltrainingRoughSceneCfg(
         num_envs=4096,
         env_spacing=4.0,
