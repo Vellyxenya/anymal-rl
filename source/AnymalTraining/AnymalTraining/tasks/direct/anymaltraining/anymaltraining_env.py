@@ -554,7 +554,7 @@ class AnymaltrainingEnv(DirectRLEnv):
             self._sample_commands(env_ids)
 
     def _sample_commands(self, env_ids: Sequence[int] | None = None) -> None:
-        """Sample planar velocity commands and preserve a subset of standing commands."""
+        """Sample general, standing, straight, and pure-turn command modes."""
         if env_ids is None:
             env_ids = torch.arange(self.num_envs, device=self.device)
         if self.cfg.manual_commands:
@@ -570,8 +570,39 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.commands[env_ids, 2] = torch.empty(len(env_ids), device=self.device).uniform_(
             self.cfg.yaw_velocity_range[0], self.cfg.yaw_velocity_range[1]
         )
-        standing_mask = torch.rand(len(env_ids), device=self.device) < self.cfg.standing_command_probability
+
+        special_probability = (
+            self.cfg.standing_command_probability
+            + self.cfg.turning_command_probability
+            + self.cfg.straight_command_probability
+        )
+        if special_probability > 1.0:
+            raise ValueError("Standing, turning, and straight command probabilities must sum to at most 1.0.")
+
+        mode_sample = torch.rand(len(env_ids), device=self.device)
+        standing_limit = self.cfg.standing_command_probability
+        turning_limit = standing_limit + self.cfg.turning_command_probability
+        straight_limit = turning_limit + self.cfg.straight_command_probability
+        standing_mask = mode_sample < standing_limit
+        turning_mask = (mode_sample >= standing_limit) & (mode_sample < turning_limit)
+        straight_mask = (mode_sample >= turning_limit) & (mode_sample < straight_limit)
+
         self.commands[env_ids[standing_mask]] = 0.0
+        self.commands[env_ids[turning_mask], :2] = 0.0
+        if torch.any(turning_mask):
+            turning_count = torch.count_nonzero(turning_mask).item()
+            maximum_yaw_speed = max(abs(bound) for bound in self.cfg.yaw_velocity_range)
+            turning_magnitude = torch.empty(turning_count, device=self.device).uniform_(
+                self.cfg.minimum_turning_yaw_speed, maximum_yaw_speed
+            )
+            turning_sign = torch.where(
+                torch.rand(turning_count, device=self.device) < 0.5,
+                -torch.ones(turning_count, device=self.device),
+                torch.ones(turning_count, device=self.device),
+            )
+            self.commands[env_ids[turning_mask], 2] = turning_sign * turning_magnitude
+        self.commands[env_ids[straight_mask], 1:] = 0.0
+
         min_steps = int(self.cfg.command_resample_range_s[0] / self.step_dt)
         max_steps = int(self.cfg.command_resample_range_s[1] / self.step_dt)
         self.command_countdown[env_ids] = torch.randint(

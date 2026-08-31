@@ -108,6 +108,9 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     lateral_velocity_range = (-0.5, 0.5)  # [m/s]
     yaw_velocity_range = (-1.0, 1.0)  # [rad/s]
     standing_command_probability = 0.1
+    turning_command_probability = 0.0
+    straight_command_probability = 0.0
+    minimum_turning_yaw_speed = 0.3  # [rad/s]
     command_resample_range_s = (5.0, 10.0)
 
     # Interactive command input (disabled during training).
@@ -184,6 +187,7 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
     gait_reward_scale = 0.0
     undesired_contact_penalty_scale = -1.0
     joint_acceleration_penalty_scale = -2.5e-7
+    yaw_velocity_reward_scale = 1.0
 
     # Learn terrain traversal before adding disturbance robustness.
     max_push_velocity = 0.0  # [m/s]
@@ -195,6 +199,10 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
 
     # Hold one command for the complete 20-second episode.
     command_resample_range_s = (20.0, 20.0)
+
+    # Explicitly teach straight traversal and pure in-place turning.
+    turning_command_probability = 0.2
+    straight_command_probability = 0.25
 
     # Permit valid stair-climbing crouches/tilts and terminate only on physical base contact.
     terminate_on_base_contact = True
