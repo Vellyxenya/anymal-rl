@@ -19,13 +19,13 @@ Run these commands from the repository root in PowerShell.
 ### Train with RSL-RL PPO
 
 ```powershell
-isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --viz none
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --run_name standing_v1 --viz none
 ```
 
 Train the separate rough-terrain policy from scratch:
 
 ```powershell
-isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Rough-Direct-v0 --viz none
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Rough-Direct-v0 --run_name rough_locomotion_v1 --viz none
 ```
 
 The rough task is traversal-focused: all terrain levels 0-9 remain represented throughout training,
@@ -82,8 +82,28 @@ To play a particular model instead, append its full path:
 ### Continue training from a checkpoint
 
 ```powershell
-isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --load_run 2026-08-29_17-42-40 --checkpoint model_999.pt --viz none --resume
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Direct-v0 --run_name standing_finetune_v2 --load_run 2026-08-29_17-42-40 --checkpoint model_999.pt --viz none --resume
 ```
+
+Every training run requires a descriptive `--run_name`. The name is appended to the timestamped log folder,
+making checkpoints easy to identify while retaining chronological ordering.
+
+### Evaluate a checkpoint
+
+Run a reproducible baseline evaluation with fixed standing, straight, turning, and combined commands:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\evaluate.py --task AnymalTraining-Rough-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 256 --episodes_per_env 1 --viz none
+```
+
+The evaluator disables pushes and curriculum changes, uses seed `42` by default, and writes:
+
+- `episodes.csv`: one row per evaluated episode.
+- `summary.csv`: results grouped by terrain family, difficulty, and command mode.
+- `summary.json`: metadata, overall results, and grouped results for programmatic comparisons.
+
+Reports are saved under an `evaluations/<timestamp>` folder beside the evaluated checkpoint. Use the same
+seed, environment count, and episode count when comparing policies.
 
 ### Launch TensorBoard
 

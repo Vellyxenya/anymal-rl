@@ -21,6 +21,7 @@ import importlib.metadata as metadata
 import logging
 import os
 import platform
+import re
 import sys
 import time
 from datetime import datetime
@@ -87,6 +88,26 @@ parser.add_argument("--external_callback", default=None, help="Fully qualified p
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
 args_cli, remaining_args = setup_preset_cli(parser)
+
+
+def _validate_run_name(run_name: str | None) -> str:
+    """Require a descriptive, filesystem-safe label for every training run."""
+    if run_name is None:
+        parser.error(
+            "--run_name is required (for example: --run_name rough_turning_v1). "
+            "Use a short label describing what this run tests."
+        )
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", run_name):
+        parser.error(
+            "--run_name must be 3-64 characters, start with a letter or number, "
+            "and contain only letters, numbers, '.', '_' or '-'."
+        )
+    if run_name.lower() in {"default", "experiment", "run", "test", "training"}:
+        parser.error(f"--run_name '{run_name}' is too generic; describe the purpose of the run.")
+    return run_name
+
+
+args_cli.run_name = _validate_run_name(args_cli.run_name)
 
 if args_cli.video:
     args_cli.enable_cameras = True
