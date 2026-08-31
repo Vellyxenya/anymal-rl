@@ -45,6 +45,7 @@ class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
 class RoughPPORunnerCfg(PPORunnerCfg):
     """Larger policy used for the rough task's height-map observations."""
 
+    num_steps_per_env = 24
     max_iterations = 1500
     experiment_name = "anymal_training_rough_direct"
     actor = RslRlMLPModelCfg(

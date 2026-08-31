@@ -49,6 +49,9 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.push_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._sample_push_intervals()
         self.feet_sensor_ids, _ = self.contact_sensor.find_sensors(".*FOOT")
+        thigh_sensor_ids, _ = self.contact_sensor.find_sensors(".*THIGH")
+        shank_sensor_ids, _ = self.contact_sensor.find_sensors(".*SHANK")
+        self.undesired_contact_sensor_ids = thigh_sensor_ids + shank_sensor_ids
         self.feet_body_ids, _ = self.robot.find_bodies(".*FOOT")
         self.left_front_foot_id = self.contact_sensor.find_sensors("LF_FOOT")[0][0]
         self.right_front_foot_id = self.contact_sensor.find_sensors("RF_FOOT")[0][0]
@@ -70,6 +73,7 @@ class AnymaltrainingEnv(DirectRLEnv):
                 "feet_air_time",
                 "foot_clearance",
                 "feet_slide",
+                "undesired_contacts",
                 "trot_gait",
                 "termination",
             )
@@ -160,10 +164,7 @@ class AnymaltrainingEnv(DirectRLEnv):
             (last_air_time - self.cfg.feet_air_time_threshold) * first_contact, dim=1
         ) * is_moving_command
 
-        feet_height = (
-            self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2]
-            - self.scene.env_origins[:, 2].unsqueeze(1)
-        )
+        feet_height = self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2] - self._ground_heights_under_feet()
         feet_horizontal_speed = torch.linalg.vector_norm(
             self.robot.data.body_lin_vel_w.torch[:, self.feet_body_ids, :2], dim=2
         )
@@ -176,6 +177,13 @@ class AnymaltrainingEnv(DirectRLEnv):
         contact_forces = self.contact_sensor.data.net_forces_w_history.torch[:, :, self.feet_sensor_ids]
         feet_in_contact = torch.max(torch.linalg.vector_norm(contact_forces, dim=-1), dim=1)[0] > 1.0
         feet_slide = torch.sum(feet_horizontal_speed * feet_in_contact, dim=1)
+        undesired_contact_forces = self.contact_sensor.data.net_forces_w_history.torch[
+            :, :, self.undesired_contact_sensor_ids
+        ]
+        undesired_contacts = torch.sum(
+            torch.max(torch.linalg.vector_norm(undesired_contact_forces, dim=-1), dim=1)[0] > 1.0,
+            dim=1,
+        )
         trot_gait = self._compute_trot_gait_reward() * is_moving_command
 
         rewards = {
@@ -199,6 +207,9 @@ class AnymaltrainingEnv(DirectRLEnv):
             "feet_air_time": self.cfg.feet_air_time_reward_scale * feet_air_time * self.step_dt,
             "foot_clearance": self.cfg.foot_clearance_reward_scale * foot_clearance * self.step_dt,
             "feet_slide": self.cfg.feet_slide_penalty_scale * feet_slide * self.step_dt,
+            "undesired_contacts": (
+                self.cfg.undesired_contact_penalty_scale * undesired_contacts * self.step_dt
+            ),
             "trot_gait": self.cfg.gait_reward_scale * trot_gait * self.step_dt,
             "termination": self.cfg.termination_penalty_scale * self.reset_terminated.float(),
         }
@@ -301,6 +312,19 @@ class AnymaltrainingEnv(DirectRLEnv):
         ray_hits_z = self.height_scanner.data.ray_hits_w.torch[..., 2]
         center_ray = ray_hits_z.shape[1] // 2
         return self.robot.data.root_pos_w.torch[:, 2] - ray_hits_z[:, center_ray]
+
+    def _ground_heights_under_feet(self) -> torch.Tensor:
+        """Estimate the local surface height below each foot from the nearest terrain ray."""
+        if self.height_scanner is None:
+            return self.scene.env_origins[:, 2].unsqueeze(1).expand(-1, len(self.feet_body_ids))
+
+        foot_xy = self.robot.data.body_pos_w.torch[:, self.feet_body_ids, :2]
+        ray_hits = self.height_scanner.data.ray_hits_w.torch
+        squared_distance = torch.sum(
+            torch.square(foot_xy.unsqueeze(2) - ray_hits[:, None, :, :2]), dim=-1
+        )
+        nearest_ray_ids = torch.argmin(squared_distance, dim=2)
+        return torch.gather(ray_hits[..., 2], dim=1, index=nearest_ray_ids)
 
     def _update_terrain_curriculum(self, env_ids: Sequence[int]) -> None:
         """Adjust difficulty using episode-wide command tracking and survival."""

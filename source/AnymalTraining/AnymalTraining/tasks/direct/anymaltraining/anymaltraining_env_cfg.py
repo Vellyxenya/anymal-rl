@@ -84,6 +84,7 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     feet_air_time_reward_scale = 0.5
     foot_clearance_reward_scale = 0.25
     feet_slide_penalty_scale = -0.2
+    undesired_contact_penalty_scale = 0.0
     gait_reward_scale = 1.0
     gait_reward_std = 0.1
     gait_max_error = 0.3  # [s]
@@ -170,3 +171,13 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
         clone_in_fabric=True,
     )
     terrain_curriculum = True
+
+    # Rough terrain requires larger, less gait-constrained leg motions.
+    target_foot_clearance = 0.14  # [m], measured from the local surface under each foot
+    undesired_contact_penalty_scale = -1.0
+    gait_reward_scale = 0.4
+    joint_pose_reward_scale = 0.05
+
+    # Introduce robustness disturbances more gently while learning high obstacles.
+    max_push_velocity = 0.2  # [m/s]
+    command_resample_range_s = (10.0, 15.0)
