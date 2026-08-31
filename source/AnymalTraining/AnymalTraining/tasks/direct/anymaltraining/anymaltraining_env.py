@@ -49,6 +49,7 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.push_countdown = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self._sample_push_intervals()
         self.feet_sensor_ids, _ = self.contact_sensor.find_sensors(".*FOOT")
+        self.base_sensor_ids, _ = self.contact_sensor.find_sensors("base")
         thigh_sensor_ids, _ = self.contact_sensor.find_sensors(".*THIGH")
         shank_sensor_ids, _ = self.contact_sensor.find_sensors(".*SHANK")
         self.undesired_contact_sensor_ids = thigh_sensor_ids + shank_sensor_ids
@@ -70,6 +71,7 @@ class AnymaltrainingEnv(DirectRLEnv):
                 "angular_velocity",
                 "action_rate",
                 "torque",
+                "joint_acceleration",
                 "feet_air_time",
                 "foot_clearance",
                 "feet_slide",
@@ -154,6 +156,10 @@ class AnymaltrainingEnv(DirectRLEnv):
         angular_velocity_error = torch.sum(torch.square(self.robot.data.root_ang_vel_b.torch[:, :2]), dim=1)
         action_rate_error = torch.mean(torch.square(self.actions - self.previous_actions), dim=1)
         torque_error = torch.mean(torch.square(self.robot.data.applied_torque.torch), dim=1)
+        if self.cfg.joint_acceleration_penalty_scale != 0.0:
+            joint_acceleration_error = torch.sum(torch.square(self.robot.data.joint_acc.torch), dim=1)
+        else:
+            joint_acceleration_error = torch.zeros(self.num_envs, device=self.device)
         is_moving_command = (torch.linalg.vector_norm(self.commands[:, :2], dim=1) > 0.1) | (
             torch.abs(self.commands[:, 2]) > 0.1
         )
@@ -164,27 +170,40 @@ class AnymaltrainingEnv(DirectRLEnv):
             (last_air_time - self.cfg.feet_air_time_threshold) * first_contact, dim=1
         ) * is_moving_command
 
-        feet_height = self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2] - self._ground_heights_under_feet()
-        feet_horizontal_speed = torch.linalg.vector_norm(
-            self.robot.data.body_lin_vel_w.torch[:, self.feet_body_ids, :2], dim=2
-        )
-        foot_clearance = torch.sum(
-            torch.exp(-torch.square(feet_height - self.cfg.target_foot_clearance) / 0.0025)
-            * torch.tanh(2.0 * feet_horizontal_speed),
-            dim=1,
-        ) * is_moving_command
+        foot_clearance = torch.zeros(self.num_envs, device=self.device)
+        feet_slide = torch.zeros(self.num_envs, device=self.device)
+        if self.cfg.foot_clearance_reward_scale != 0.0 or self.cfg.feet_slide_penalty_scale != 0.0:
+            feet_height = (
+                self.robot.data.body_pos_w.torch[:, self.feet_body_ids, 2]
+                - self._ground_heights_under_feet()
+            )
+            feet_horizontal_speed = torch.linalg.vector_norm(
+                self.robot.data.body_lin_vel_w.torch[:, self.feet_body_ids, :2], dim=2
+            )
+            foot_clearance = torch.sum(
+                torch.exp(-torch.square(feet_height - self.cfg.target_foot_clearance) / 0.0025)
+                * torch.tanh(2.0 * feet_horizontal_speed),
+                dim=1,
+            ) * is_moving_command
+            contact_forces = self.contact_sensor.data.net_forces_w_history.torch[:, :, self.feet_sensor_ids]
+            feet_in_contact = torch.max(torch.linalg.vector_norm(contact_forces, dim=-1), dim=1)[0] > 1.0
+            feet_slide = torch.sum(feet_horizontal_speed * feet_in_contact, dim=1)
 
-        contact_forces = self.contact_sensor.data.net_forces_w_history.torch[:, :, self.feet_sensor_ids]
-        feet_in_contact = torch.max(torch.linalg.vector_norm(contact_forces, dim=-1), dim=1)[0] > 1.0
-        feet_slide = torch.sum(feet_horizontal_speed * feet_in_contact, dim=1)
-        undesired_contact_forces = self.contact_sensor.data.net_forces_w_history.torch[
-            :, :, self.undesired_contact_sensor_ids
-        ]
-        undesired_contacts = torch.sum(
-            torch.max(torch.linalg.vector_norm(undesired_contact_forces, dim=-1), dim=1)[0] > 1.0,
-            dim=1,
-        )
-        trot_gait = self._compute_trot_gait_reward() * is_moving_command
+        if self.cfg.undesired_contact_penalty_scale != 0.0:
+            undesired_contact_forces = self.contact_sensor.data.net_forces_w_history.torch[
+                :, :, self.undesired_contact_sensor_ids
+            ]
+            undesired_contacts = torch.sum(
+                torch.max(torch.linalg.vector_norm(undesired_contact_forces, dim=-1), dim=1)[0] > 1.0,
+                dim=1,
+            )
+        else:
+            undesired_contacts = torch.zeros(self.num_envs, device=self.device)
+
+        if self.cfg.gait_reward_scale != 0.0:
+            trot_gait = self._compute_trot_gait_reward() * is_moving_command
+        else:
+            trot_gait = torch.zeros(self.num_envs, device=self.device)
 
         rewards = {
             "base_height": self.cfg.height_reward_scale * torch.exp(-base_height_error / 0.01) * self.step_dt,
@@ -204,6 +223,9 @@ class AnymaltrainingEnv(DirectRLEnv):
             "angular_velocity": self.cfg.angular_velocity_penalty_scale * angular_velocity_error * self.step_dt,
             "action_rate": self.cfg.action_rate_penalty_scale * action_rate_error * self.step_dt,
             "torque": self.cfg.torque_penalty_scale * torque_error * self.step_dt,
+            "joint_acceleration": (
+                self.cfg.joint_acceleration_penalty_scale * joint_acceleration_error * self.step_dt
+            ),
             "feet_air_time": self.cfg.feet_air_time_reward_scale * feet_air_time * self.step_dt,
             "foot_clearance": self.cfg.foot_clearance_reward_scale * foot_clearance * self.step_dt,
             "feet_slide": self.cfg.feet_slide_penalty_scale * feet_slide * self.step_dt,
@@ -233,6 +255,14 @@ class AnymaltrainingEnv(DirectRLEnv):
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         time_out = self.episode_length_buf >= self.max_episode_length - 1
+        if self.cfg.terminate_on_base_contact:
+            base_contact_forces = self.contact_sensor.data.net_forces_w_history.torch[:, :, self.base_sensor_ids]
+            base_contact = torch.any(
+                torch.max(torch.linalg.vector_norm(base_contact_forces, dim=-1), dim=1)[0] > 1.0,
+                dim=1,
+            )
+            return base_contact, time_out
+
         too_low = self._base_height_above_terrain() < self.cfg.min_base_height
         base_tilt = torch.linalg.vector_norm(self.robot.data.projected_gravity_b.torch[:, :2], dim=1)
         too_tilted = base_tilt > self.cfg.max_base_tilt

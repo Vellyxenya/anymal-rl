@@ -80,6 +80,7 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     angular_velocity_penalty_scale = -0.2
     action_rate_penalty_scale = -0.05
     torque_penalty_scale = -2.0e-5
+    joint_acceleration_penalty_scale = 0.0
     termination_penalty_scale = -2.0
     feet_air_time_reward_scale = 0.5
     foot_clearance_reward_scale = 0.25
@@ -127,6 +128,7 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     evaluation_terrain_type = ""
     evaluation_terrain_level = -1
     follow_camera = True
+    terminate_on_base_contact = False
 
 
 @configclass
@@ -137,7 +139,7 @@ class AnymaltrainingRoughSceneCfg(AnymaltrainingSceneCfg):
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=ROUGH_TERRAINS_CFG.replace(curriculum=True),
-        max_init_terrain_level=2,
+        max_init_terrain_level=9,
         collision_group=-1,
         physics_material=sim_utils.RigidBodyMaterialCfg(
             friction_combine_mode="multiply",
@@ -170,14 +172,29 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
         replicate_physics=True,
         clone_in_fabric=True,
     )
-    terrain_curriculum = True
+    # Train on every difficulty continuously instead of promoting/demoting environments.
+    terrain_curriculum = False
 
-    # Rough terrain requires larger, less gait-constrained leg motions.
-    target_foot_clearance = 0.14  # [m], measured from the local surface under each foot
+    # Traversal-focused rewards: allow crouching, pitching, and irregular stepping.
+    height_reward_scale = 0.0
+    upright_reward_scale = 0.0
+    joint_pose_reward_scale = 0.0
+    foot_clearance_reward_scale = 0.0
+    feet_slide_penalty_scale = 0.0
+    gait_reward_scale = 0.0
     undesired_contact_penalty_scale = -1.0
-    gait_reward_scale = 0.4
-    joint_pose_reward_scale = 0.05
+    joint_acceleration_penalty_scale = -2.5e-7
 
-    # Introduce robustness disturbances more gently while learning high obstacles.
-    max_push_velocity = 0.2  # [m/s]
-    command_resample_range_s = (10.0, 15.0)
+    # Learn terrain traversal before adding disturbance robustness.
+    max_push_velocity = 0.0  # [m/s]
+    initial_joint_position_noise = 0.0
+    initial_joint_velocity_noise = 0.0
+    initial_base_tilt = 0.0
+    initial_base_linear_velocity = 0.0
+    initial_base_angular_velocity = 0.0
+
+    # Hold one command for the complete 20-second episode.
+    command_resample_range_s = (20.0, 20.0)
+
+    # Permit valid stair-climbing crouches/tilts and terminate only on physical base contact.
+    terminate_on_base_contact = True

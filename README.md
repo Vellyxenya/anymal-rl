@@ -28,6 +28,11 @@ Train the separate rough-terrain policy from scratch:
 isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Rough-Direct-v0 --viz none
 ```
 
+The rough task is traversal-focused: all terrain levels 0-9 remain represented throughout training,
+commands last for a complete episode, and episodes terminate on physical base contact rather than nominal
+height or tilt. Train this version from scratch instead of resuming a checkpoint trained with the earlier
+standing/gait-shaped reward.
+
 ### Play the latest trained policy
 
 ```powershell
