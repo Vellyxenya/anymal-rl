@@ -6,6 +6,8 @@ This project trains an ANYmal C quadruped with PPO to track planar velocity comm
 generated rough terrain. The work progresses from standing and disturbance recovery to command-conditioned
 locomotion, terrain curricula, controlled gait evaluation, domain randomization, and held-out physics tests.
 
+![ANYmal C locomotion project on procedurally generated rough terrain](media/anymal-rough-terrain-hero.jpg)
+
 ## Demo
 
 ![ANYmal C traversing procedurally generated rough terrain](media/anymal-rough-terrain-demo.webp)
