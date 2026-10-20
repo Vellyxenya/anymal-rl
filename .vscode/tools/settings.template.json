@@ -4,7 +4,7 @@
         "*.kit": "toml",
         "*.rst": "restructuredtext"
     },
-    "editor.rulers": [120],
+    "editor.rulers": [140],
 
     // files to be ignored by the linter
     "files.watcherExclude": {
@@ -57,6 +57,9 @@
     "python.languageServer": "Pylance",
     // Use ruff as a formatter and linter
     "ruff.configuration": "${workspaceFolder}/pyproject.toml",
+    // Keep Flake8 aligned with Ruff policy when the Flake8 extension is enabled.
+    "flake8.args": ["--max-line-length=140", "--extend-ignore=E501"],
+    "flake8.enabled": false,
     // Use docstring generator
     "autoDocstring.docstringFormat": "google",
     "autoDocstring.guessTypes": true,

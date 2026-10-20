@@ -31,3 +31,37 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:RoughPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="AnymalTraining-Rough-DR-Direct-v0",
+    entry_point=f"{__name__}.anymaltraining_env:AnymaltrainingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.anymaltraining_env_cfg:AnymaltrainingRoughDomainRandomizedEnvCfg"
+        ),
+        "rsl_rl_cfg_entry_point": (
+            f"{agents.__name__}.rsl_rl_ppo_cfg:DomainRandomizedRoughPPORunnerCfg"
+        ),
+    },
+)
+
+gym.register(
+    id="AnymalTraining-Rough-PhaseClock-Direct-v0",
+    entry_point=f"{__name__}.anymaltraining_env:AnymaltrainingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.anymaltraining_env_cfg:AnymaltrainingPhaseClockEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:PhaseClockRoughPPORunnerCfg",
+    },
+)
+
+gym.register(
+    id="AnymalTraining-Rough-OOD-Direct-v0",
+    entry_point=f"{__name__}.anymaltraining_env:AnymaltrainingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.anymaltraining_env_cfg:AnymaltrainingRoughOODEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:RoughPPORunnerCfg",
+    },
+)

@@ -58,7 +58,6 @@ class AnymaltrainingEnv(DirectRLEnv):
         self.right_front_foot_id = self.contact_sensor.find_sensors("RF_FOOT")[0][0]
         self.left_hind_foot_id = self.contact_sensor.find_sensors("LH_FOOT")[0][0]
         self.right_hind_foot_id = self.contact_sensor.find_sensors("RH_FOOT")[0][0]
-
         self.episode_reward_sums = {
             name: torch.zeros(self.num_envs, device=self.device)
             for name in (
@@ -77,6 +76,7 @@ class AnymaltrainingEnv(DirectRLEnv):
                 "feet_slide",
                 "undesired_contacts",
                 "trot_gait",
+                "phase_contact",
                 "termination",
             )
         }
@@ -139,6 +139,11 @@ class AnymaltrainingEnv(DirectRLEnv):
             ).clip(-1.0, 1.0)
             observations.append(terrain_heights)
         observations.append(self.actions)
+        if self.cfg.gait_phase_clock:
+            phase = self._gait_phase()
+            observations.append(
+                torch.stack((torch.sin(2.0 * torch.pi * phase), torch.cos(2.0 * torch.pi * phase)), dim=1)
+            )
         obs = torch.cat(observations, dim=-1)
         return {"policy": obs}
 
@@ -169,7 +174,6 @@ class AnymaltrainingEnv(DirectRLEnv):
         feet_air_time = torch.sum(
             (last_air_time - self.cfg.feet_air_time_threshold) * first_contact, dim=1
         ) * is_moving_command
-
         foot_clearance = torch.zeros(self.num_envs, device=self.device)
         feet_slide = torch.zeros(self.num_envs, device=self.device)
         if self.cfg.foot_clearance_reward_scale != 0.0 or self.cfg.feet_slide_penalty_scale != 0.0:
@@ -205,6 +209,16 @@ class AnymaltrainingEnv(DirectRLEnv):
         else:
             trot_gait = torch.zeros(self.num_envs, device=self.device)
 
+        if self.cfg.gait_phase_contact_reward_scale != 0.0:
+            straight_forward_command = (
+                (self.commands[:, 0] > 0.3)
+                & (torch.abs(self.commands[:, 1]) < 0.1)
+                & (torch.abs(self.commands[:, 2]) < 0.1)
+            )
+            phase_contact = self._compute_phase_contact_reward() * straight_forward_command
+        else:
+            phase_contact = torch.zeros(self.num_envs, device=self.device)
+
         rewards = {
             "base_height": self.cfg.height_reward_scale * torch.exp(-base_height_error / 0.01) * self.step_dt,
             "upright": self.cfg.upright_reward_scale * torch.exp(-tilt_error / 0.1) * self.step_dt,
@@ -233,6 +247,7 @@ class AnymaltrainingEnv(DirectRLEnv):
                 self.cfg.undesired_contact_penalty_scale * undesired_contacts * self.step_dt
             ),
             "trot_gait": self.cfg.gait_reward_scale * trot_gait * self.step_dt,
+            "phase_contact": self.cfg.gait_phase_contact_reward_scale * phase_contact * self.step_dt,
             "termination": self.cfg.termination_penalty_scale * self.reset_terminated.float(),
         }
 
@@ -622,12 +637,37 @@ class AnymaltrainingEnv(DirectRLEnv):
         )
         return sync_reward * async_reward
 
+    def _gait_phase(self) -> torch.Tensor:
+        """Return the shared gait clock in normalized cycles [0, 1)."""
+        episode_time = self.episode_length_buf.float() * self.step_dt
+        return torch.remainder(episode_time * self.cfg.gait_phase_frequency, 1.0)
+
+    def _compute_phase_contact_reward(self) -> torch.Tensor:
+        """Reward contact states that follow the observable cyclic trot schedule."""
+        phase = self._gait_phase()
+        pair_a_stance = phase < self.cfg.gait_phase_duty_factor
+        pair_b_phase = torch.remainder(phase + 0.5, 1.0)
+        pair_b_stance = pair_b_phase < self.cfg.gait_phase_duty_factor
+        desired_contact = torch.stack(
+            (pair_a_stance, pair_b_stance, pair_b_stance, pair_a_stance), dim=1
+        ).float()
+        foot_ids = (
+            self.left_front_foot_id,
+            self.right_front_foot_id,
+            self.left_hind_foot_id,
+            self.right_hind_foot_id,
+        )
+        actual_contact = (self.contact_sensor.data.current_contact_time.torch[:, foot_ids] > 0.0).float()
+        return 1.0 - torch.mean(torch.abs(actual_contact - desired_contact), dim=1)
+
     def _feet_sync_reward(self, foot_0: int, foot_1: int) -> torch.Tensor:
         """Measure whether two feet share the same contact/air phase."""
         air_time = self.contact_sensor.data.current_air_time.torch
         contact_time = self.contact_sensor.data.current_contact_time.torch
         max_error_squared = self.cfg.gait_max_error**2
-        air_error = torch.clamp(torch.square(air_time[:, foot_0] - air_time[:, foot_1]), max=max_error_squared)
+        air_error = torch.clamp(
+            torch.square(air_time[:, foot_0] - air_time[:, foot_1]), max=max_error_squared
+        )
         contact_error = torch.clamp(
             torch.square(contact_time[:, foot_0] - contact_time[:, foot_1]), max=max_error_squared
         )

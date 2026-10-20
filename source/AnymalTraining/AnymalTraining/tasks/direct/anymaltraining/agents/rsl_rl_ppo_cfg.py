@@ -59,3 +59,17 @@ class RoughPPORunnerCfg(PPORunnerCfg):
         activation="elu",
         obs_normalization=False,
     )
+
+
+@configclass
+class PhaseClockRoughPPORunnerCfg(RoughPPORunnerCfg):
+    """Keep the phase-clock ablation in a separate experiment directory."""
+
+    experiment_name = "anymal_training_rough_phase_clock_direct"
+
+
+@configclass
+class DomainRandomizedRoughPPORunnerCfg(RoughPPORunnerCfg):
+    """Keep randomized runs separate while retaining the compatible policy architecture."""
+
+    experiment_name = "anymal_training_rough_dr_direct"

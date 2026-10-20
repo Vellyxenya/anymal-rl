@@ -1,0 +1,87 @@
+{
+  "metadata": {
+    "checkpoint": ".\\checkpoints\\phase_clock\\model_3100_selected.pt",
+    "task": "AnymalTraining-Rough-PhaseClock-Direct-v0",
+    "terrain": "flat plane",
+    "seed": 42,
+    "duration_s": 10.0,
+    "warmup_s": 2.0,
+    "command": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "contact_threshold_n": 1.0,
+    "trot_targets": {
+      "LF-RH": 0.0,
+      "LF-RF": 0.5,
+      "LF-LH": 0.5
+    },
+    "trot_deviation_definition": "phase_mae + 0.25*duty_factor_cv + 0.25*stride_period_cv"
+  },
+  "summary": {
+    "trials": 1,
+    "valid_trials": 1,
+    "fall_rate": 0.0,
+    "trot_deviation_index": {
+      "mean": 0.0381229849759782,
+      "std": 0.0
+    },
+    "phase_mae_cycles": {
+      "mean": 0.01670321637426902,
+      "std": 0.0
+    },
+    "duty_factor_mean": {
+      "mean": 0.5245,
+      "std": 0.0
+    },
+    "duty_factor_cv": {
+      "mean": 0.08312219576092517,
+      "std": 0.0
+    },
+    "duty_factor_range": {
+      "mean": 0.10199999999999998,
+      "std": 0.0
+    },
+    "stride_period_cv": {
+      "mean": 0.002556878645911568,
+      "std": 0.0
+    },
+    "mean_stride_period_s": {
+      "mean": 0.39979166666666677,
+      "std": 0.0
+    },
+    "mean_vx_mps": {
+      "mean": 1.0174245834350586,
+      "std": 0.0
+    },
+    "mean_velocity_error_mps": {
+      "mean": 0.0326722078025341,
+      "std": 0.0
+    },
+    "diagonal_contact_agreement": {
+      "mean": 0.902,
+      "std": 0.0
+    },
+    "other_diagonal_contact_agreement": {
+      "mean": 0.9,
+      "std": 0.0
+    },
+    "diagonal_pair_opposition": {
+      "mean": 0.998,
+      "std": 0.0
+    },
+    "phase_error_LF_RF": {
+      "mean": 0.0010964912280701765,
+      "std": 0.0
+    },
+    "phase_error_LF_LH": {
+      "mean": 0.0010964912280701765,
+      "std": 0.0
+    },
+    "phase_error_LF_RH": {
+      "mean": 0.04791666666666671,
+      "std": 0.0
+    }
+  }
+}

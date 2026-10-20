@@ -1,0 +1,87 @@
+{
+  "metadata": {
+    "checkpoint": ".\\logs\\rsl_rl\\anymal_training_rough_direct\\2026-09-13_14-49-55_gait_split_sync005_async010_500\\model_2996.pt",
+    "task": "AnymalTraining-Rough-Direct-v0",
+    "terrain": "flat plane",
+    "seed": 42,
+    "duration_s": 10.0,
+    "warmup_s": 2.0,
+    "command": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "contact_threshold_n": 1.0,
+    "trot_targets": {
+      "LF-RH": 0.0,
+      "LF-RF": 0.5,
+      "LF-LH": 0.5
+    },
+    "trot_deviation_definition": "phase_mae + 0.25*duty_factor_cv + 0.25*stride_period_cv"
+  },
+  "summary": {
+    "trials": 64,
+    "valid_trials": 64,
+    "fall_rate": 0.0,
+    "trot_deviation_index": {
+      "mean": 0.05496154026195174,
+      "std": 0.001573334482333601
+    },
+    "phase_mae_cycles": {
+      "mean": 0.035934102751536946,
+      "std": 0.001564896721664682
+    },
+    "duty_factor_mean": {
+      "mean": 0.54625,
+      "std": 0.0010690449676497064
+    },
+    "duty_factor_cv": {
+      "mean": 0.04855703127126732,
+      "std": 0.002947957799554038
+    },
+    "duty_factor_range": {
+      "mean": 0.07312499999999995,
+      "std": 0.004463253849002424
+    },
+    "stride_period_cv": {
+      "mean": 0.027552718770391886,
+      "std": 9.481893166340705E-06
+    },
+    "mean_stride_period_s": {
+      "mean": 0.36972823183760684,
+      "std": 0.00025861858109840535
+    },
+    "mean_vx_mps": {
+      "mean": 1.0015452271327376,
+      "std": 0.0008040249688682681
+    },
+    "mean_velocity_error_mps": {
+      "mean": 0.0270782612496987,
+      "std": 0.0003100984088452486
+    },
+    "diagonal_contact_agreement": {
+      "mean": 0.8960625,
+      "std": 0.0030647768504178507
+    },
+    "other_diagonal_contact_agreement": {
+      "mean": 0.8614375,
+      "std": 0.0036072017911263
+    },
+    "diagonal_pair_opposition": {
+      "mean": 0.9462187499999999,
+      "std": 0.0010152605420550775
+    },
+    "phase_error_LF_RF": {
+      "mean": 0.012730895748987843,
+      "std": 0.000503808554972756
+    },
+    "phase_error_LF_LH": {
+      "mean": 0.04523729194781827,
+      "std": 0.003159209021565563
+    },
+    "phase_error_LF_RH": {
+      "mean": 0.04983412055780475,
+      "std": 0.003256553709937826
+    }
+  }
+}

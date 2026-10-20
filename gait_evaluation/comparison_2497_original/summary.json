@@ -1,0 +1,87 @@
+{
+  "metadata": {
+    "checkpoint": ".\\logs\\rsl_rl\\anymal_training_rough_direct\\2026-08-31_15-54-40_nominal_control_500\\model_2497.pt",
+    "task": "AnymalTraining-Rough-Direct-v0",
+    "terrain": "flat plane",
+    "seed": 42,
+    "duration_s": 10.0,
+    "warmup_s": 2.0,
+    "command": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "contact_threshold_n": 1.0,
+    "trot_targets": {
+      "LF-RH": 0.0,
+      "LF-RF": 0.5,
+      "LF-LH": 0.5
+    },
+    "trot_deviation_definition": "phase_mae + 0.25*duty_factor_cv + 0.25*stride_period_cv"
+  },
+  "summary": {
+    "trials": 1,
+    "valid_trials": 1,
+    "fall_rate": 0.0,
+    "trot_deviation_index": {
+      "mean": 0.07611987425544413,
+      "std": 0.0
+    },
+    "phase_mae_cycles": {
+      "mean": 0.027590343379817053,
+      "std": 0.0
+    },
+    "duty_factor_mean": {
+      "mean": 0.5055,
+      "std": 0.0
+    },
+    "duty_factor_cv": {
+      "mean": 0.1666277724078836,
+      "std": 0.0
+    },
+    "duty_factor_range": {
+      "mean": 0.188,
+      "std": 0.0
+    },
+    "stride_period_cv": {
+      "mean": 0.027490351094624707,
+      "std": 0.0
+    },
+    "mean_stride_period_s": {
+      "mean": 0.36903846153846154,
+      "std": 0.0
+    },
+    "mean_vx_mps": {
+      "mean": 1.0072853565216064,
+      "std": 0.0
+    },
+    "mean_velocity_error_mps": {
+      "mean": 0.03491022810339928,
+      "std": 0.0
+    },
+    "diagonal_contact_agreement": {
+      "mean": 0.704,
+      "std": 0.0
+    },
+    "other_diagonal_contact_agreement": {
+      "mean": 0.854,
+      "std": 0.0
+    },
+    "diagonal_pair_opposition": {
+      "mean": 0.844,
+      "std": 0.0
+    },
+    "phase_error_LF_RF": {
+      "mean": 0.016419253261358513,
+      "std": 0.0
+    },
+    "phase_error_LF_LH": {
+      "mean": 0.012145748987854237,
+      "std": 0.0
+    },
+    "phase_error_LF_RH": {
+      "mean": 0.0542060278902384,
+      "std": 0.0
+    }
+  }
+}

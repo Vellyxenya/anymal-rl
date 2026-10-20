@@ -11,6 +11,9 @@
 *.jit filter=lfs diff=lfs merge=lfs -text
 *.hdf5 filter=lfs diff=lfs merge=lfs -text
 
+# Selected portfolio checkpoints are small enough to keep directly in Git.
+checkpoints/**/*.pt -filter -diff -merge -text
+
 source/isaaclab_tasks/test/golden_images/**/*.png filter=lfs diff=lfs merge=lfs -text
 
 *.bat text eol=crlf

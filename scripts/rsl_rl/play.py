@@ -21,6 +21,8 @@ import importlib.metadata as metadata
 import os
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 import gymnasium as gym
 import torch
@@ -78,6 +80,10 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument("--plot_gait", action="store_true", help="Record foot contacts and save a gait diagram.")
+parser.add_argument("--gait_plot_duration", type=float, default=10.0, help="Seconds recorded by --plot_gait.")
+parser.add_argument("--gait_plot_env", type=int, default=0, help="Environment index recorded by --plot_gait.")
+parser.add_argument("--gait_plot_output", type=str, default=None, help="Optional output path for the gait PNG.")
 parser.add_argument("--external_callback", default=None, help="Fully qualified path to an externally defined callback.")
 cli_args.add_rsl_rl_args(parser)
 add_launcher_args(parser)
@@ -104,6 +110,44 @@ sys.argv = [sys.argv[0]] + remaining_args
 
 # Check for installed RSL-RL version
 installed_version = metadata.version("rsl-rl-lib")
+
+
+def save_gait_plot(contact_history: list[list[bool]], dt: float, output_path: str, checkpoint_name: str):
+    """Save a four-foot contact raster and print the corresponding duty factors."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.patches import Patch
+
+    contacts = np.asarray(contact_history, dtype=np.uint8).T
+    foot_names = ("LF", "RF", "LH", "RH")
+    duration = contacts.shape[1] * dt
+
+    fig, ax = plt.subplots(figsize=(12, 3.5))
+    ax.imshow(
+        contacts,
+        aspect="auto",
+        interpolation="nearest",
+        cmap="Greys",
+        vmin=0,
+        vmax=1,
+        extent=(0.0, duration, len(foot_names) - 0.5, -0.5),
+    )
+    ax.set_yticks(range(len(foot_names)), labels=foot_names)
+    ax.set_xlabel("Time [s]")
+    ax.set_ylabel("Foot")
+    ax.set_title(f"Foot-contact gait diagram — {checkpoint_name}")
+    ax.legend(
+        handles=(Patch(facecolor="black", label="Contact"), Patch(facecolor="white", edgecolor="black", label="Swing")),
+        loc="upper right",
+        ncols=2,
+    )
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+
+    duty_factors = contacts.mean(axis=1)
+    print(f"[INFO] Saved gait plot to: {output_path}")
+    print("[INFO] Foot duty factors: " + ", ".join(f"{name}={value:.1%}" for name, value in zip(foot_names, duty_factors)))
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -215,6 +259,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
         dt = env.unwrapped.step_dt
 
+        if args_cli.plot_gait and args_cli.gait_plot_duration <= 0.0:
+            raise ValueError("--gait_plot_duration must be greater than zero.")
+        if args_cli.plot_gait and not 0 <= args_cli.gait_plot_env < env.unwrapped.num_envs:
+            raise ValueError(f"--gait_plot_env must be between 0 and {env.unwrapped.num_envs - 1}.")
+
+        gait_contact_history = []
+        gait_steps = max(1, round(args_cli.gait_plot_duration / dt))
+        gait_foot_ids = None
+        if args_cli.plot_gait:
+            base_env = env.unwrapped
+            gait_foot_ids = (
+                base_env.left_front_foot_id,
+                base_env.right_front_foot_id,
+                base_env.left_hind_foot_id,
+                base_env.right_hind_foot_id,
+            )
+
         # reset environment
         obs = env.get_observations()
         timestep = 0
@@ -228,6 +289,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     actions = policy(obs)
                     # env stepping
                     obs, _, dones, _ = env.step(actions)
+                    if args_cli.plot_gait:
+                        contact_forces = env.unwrapped.contact_sensor.data.net_forces_w_history.torch[
+                            args_cli.gait_plot_env, :, gait_foot_ids
+                        ]
+                        gait_contact_history.append(
+                            (torch.max(torch.linalg.vector_norm(contact_forces, dim=-1), dim=0).values > 1.0)
+                            .cpu()
+                            .tolist()
+                        )
                     # reset recurrent states for episodes that have terminated
                     if version.parse(installed_version) >= version.parse("4.0.0"):
                         policy.reset(dones)
@@ -237,15 +307,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                     timestep += 1
                     if timestep == args_cli.video_length:
                         break
+                if args_cli.plot_gait and len(gait_contact_history) >= gait_steps:
+                    break
 
                 sleep_time = dt - (time.time() - start_time)
                 if args_cli.real_time and sleep_time > 0:
                     time.sleep(sleep_time)
 
-            # close the simulator
-            env.close()
         except KeyboardInterrupt:
             pass
+        finally:
+            if args_cli.plot_gait and gait_contact_history:
+                if args_cli.gait_plot_output:
+                    output_path = Path(args_cli.gait_plot_output).expanduser().resolve()
+                else:
+                    output_path = Path(log_dir) / "gait_plots" / f"gait_{datetime.now():%Y%m%d_%H%M%S}.png"
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                save_gait_plot(gait_contact_history, dt, str(output_path), os.path.basename(resume_path))
+            env.close()
 
 
 if __name__ == "__main__":

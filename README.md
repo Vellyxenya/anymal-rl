@@ -1,16 +1,31 @@
-# Template for Isaac Lab Projects
+# Learning Robust Quadruped Locomotion with Isaac Lab
 
 ## Overview
 
-This project/repository serves as a template for building projects or extensions based on Isaac Lab.
-It allows you to develop in an isolated environment, outside of the core Isaac Lab repository.
+This project trains an ANYmal C quadruped with PPO to track planar velocity commands across flat and procedurally
+generated rough terrain. The work progresses from standing and disturbance recovery to command-conditioned
+locomotion, terrain curricula, controlled gait evaluation, domain randomization, and held-out physics tests.
+
+The complete locomotion, domain-randomization, and held-out OOD evaluation methodology and findings are
+documented in [DOMAIN_RANDOMIZATION_REPORT.md](DOMAIN_RANDOMIZATION_REPORT.md).
 
 **Key Features:**
 
-- `Isolation` Work outside the core Isaac Lab repository, ensuring that your development efforts remain self-contained.
-- `Flexibility` This template is set up to allow your code to be run as an extension in Omniverse.
+- Direct Isaac Lab environment with velocity tracking, rough terrain, external pushes, and keyboard control
+- PPO training and playback through RSL-RL
+- Terrain curriculum and separate nominal, randomized, and held-out physics configurations
+- Reproducible policy and gait evaluation with paired comparisons and bootstrap confidence intervals
+- Selected checkpoints, exported policies, experiment data, figures, and an interview presentation
 
-**Keywords:** extension, template, isaaclab
+**Stack:** Isaac Lab, Isaac Sim, PyTorch, Gymnasium, RSL-RL, TensorBoard
+
+## Project artifacts
+
+- [Domain-randomization study](DOMAIN_RANDOMIZATION_REPORT.md)
+- [Controlled gait evaluation](GAIT_EVALUATION_REPORT.md)
+- [Phase-clock gait experiment](PHASE_CLOCK_GAIT_REPORT.md)
+- [Final presentation](deliverables/Locomotion_Projects_Interview_Walkthrough_PhaseClock.pptx)
+- [Selected deployable policy](checkpoints/phase_clock/exported/policy.pt)
 
 ## Common commands
 
@@ -51,6 +66,39 @@ Play the rough-terrain policy (append `--checkpoint` if needed):
 
 ```powershell
 isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Rough-Direct-v0 --viz kit --num_envs 1 --real-time
+```
+
+Record a 10-second four-foot contact diagram while playing a checkpoint:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Rough-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 1 --plot_gait --gait_plot_duration 10 --viz kit
+```
+
+The PNG is saved under the checkpoint run's `gait_plots` directory. Black intervals indicate ground contact,
+white intervals indicate swing, and the console prints each foot's duty factor.
+
+### Phase-conditioned gait policy
+
+The phase-clock ablation adds an observable cyclic trot reference and dense contact-schedule feedback while
+leaving the established rough-terrain task unchanged. See [PHASE_CLOCK_GAIT_REPORT.md](PHASE_CLOCK_GAIT_REPORT.md)
+for the design, failed precursor experiment, controlled metrics, rough-terrain tradeoff, and reproduction steps.
+
+Play the selected model:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\play.py --task AnymalTraining-Rough-PhaseClock-Direct-v0 --checkpoint ".\checkpoints\phase_clock\model_3100_selected.pt" --num_envs 1 --viz kit
+```
+
+Run a controlled 1 m/s flat-terrain gait evaluation:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\evaluate_gait.py --task AnymalTraining-Rough-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 64 --seed 42 --warmup 2 --duration 10 --command_vx 1.0 --output_dir ".\gait_evaluation\run_name" --viz none
+```
+
+Compare two paired evaluations with bootstrap confidence intervals:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\compare_gait.py .\gait_evaluation\before .\gait_evaluation\after --output .\gait_evaluation\comparison.json
 ```
 
 Lock play to a particular terrain family and difficulty level (0 is easiest, 9 is hardest):
@@ -104,6 +152,53 @@ The evaluator disables pushes and curriculum changes, uses seed `42` by default,
 
 Reports are saved under an `evaluations/<timestamp>` folder beside the evaluated checkpoint. Use the same
 seed, environment count, and episode count when comparing policies.
+
+### Train with domain randomization
+
+Fine-tune the nominal rough-terrain policy under randomized friction, base mass and center of mass,
+actuator gains, reset states, and modest external pushes:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Rough-DR-Direct-v0 --run_name dr_finetune_v1 --resume --checkpoint "C:\path\to\nominal\model_1998.pt" --max_iterations 500 --viz none
+```
+
+The randomized task uses a separate `anymal_training_rough_dr_direct` experiment folder. The observation and
+action spaces and policy architecture are unchanged, so nominal checkpoints are compatible and can be passed
+directly as an absolute `--checkpoint` path.
+
+After training, evaluate both checkpoints under the same conditions and seed. The nominal rough task measures
+the cost on nominal physics; the domain-randomized task measures robustness across randomized physics:
+
+```powershell
+# Nominal physics
+isaaclab -p .\scripts\rsl_rl\evaluate.py --task AnymalTraining-Rough-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 256 --episodes_per_env 1 --seed 42 --viz none
+
+# Randomized physics
+isaaclab -p .\scripts\rsl_rl\evaluate.py --task AnymalTraining-Rough-DR-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 256 --episodes_per_env 1 --seed 42 --viz none
+```
+
+### Fair domain-randomization comparison
+
+The DR fine-tune must be compared against a nominal control that receives the same 500 additional iterations
+from the same starting checkpoint:
+
+```powershell
+isaaclab -p .\scripts\rsl_rl\train.py --task AnymalTraining-Rough-Direct-v0 --run_name nominal_control_500 --resume --checkpoint "C:\path\to\model_1998.pt" --max_iterations 500 --viz none
+```
+
+Evaluate both final checkpoints using identical environment counts and seeds on:
+
+```powershell
+# Nominal physics
+isaaclab -p .\scripts\rsl_rl\evaluate.py --task AnymalTraining-Rough-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 256 --episodes_per_env 1 --seed 42 --viz none
+
+# Held-out OOD stress physics (never used for training)
+isaaclab -p .\scripts\rsl_rl\evaluate.py --task AnymalTraining-Rough-OOD-Direct-v0 --checkpoint "C:\path\to\model.pt" --num_envs 256 --episodes_per_env 1 --seed 42 --viz none
+```
+
+The OOD task deliberately samples outside the DR training support: lower contact friction, a heavier base,
+a larger center-of-mass offset, weaker stiffness, higher damping, and greater restitution. It is an evaluation
+stress test and should not be used for training.
 
 ### Launch TensorBoard
 

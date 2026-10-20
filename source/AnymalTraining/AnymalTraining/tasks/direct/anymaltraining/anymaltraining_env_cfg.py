@@ -3,9 +3,12 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg
 from isaaclab.envs import DirectRLEnvCfg
+from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.sim import SimulationCfg
@@ -89,6 +92,10 @@ class AnymaltrainingEnvCfg(DirectRLEnvCfg):
     gait_reward_scale = 1.0
     gait_reward_std = 0.1
     gait_max_error = 0.3  # [s]
+    gait_phase_clock = False
+    gait_phase_frequency = 2.5  # [Hz]
+    gait_phase_duty_factor = 0.55
+    gait_phase_contact_reward_scale = 0.0
     feet_air_time_threshold = 0.3  # [s]
     target_foot_clearance = 0.08  # [m]
 
@@ -184,7 +191,10 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
     joint_pose_reward_scale = 0.0
     foot_clearance_reward_scale = 0.0
     feet_slide_penalty_scale = 0.0
-    gait_reward_scale = 0.0
+    # A small gait-consistency reward prevents persistent three-legged locomotion
+    # without making the fixed trot pattern dominate rough-terrain traversal.
+    gait_reward_scale = 0.35
+    gait_max_error = 0.2  # [s], sharpen timing feedback without changing the flat task
     undesired_contact_penalty_scale = -1.0
     joint_acceleration_penalty_scale = -2.5e-7
     yaw_velocity_reward_scale = 1.0
@@ -206,3 +216,136 @@ class AnymaltrainingRoughEnvCfg(AnymaltrainingEnvCfg):
 
     # Permit valid stair-climbing crouches/tilts and terminate only on physical base contact.
     terminate_on_base_contact = True
+
+
+@configclass
+class AnymaltrainingPhaseClockEnvCfg(AnymaltrainingRoughEnvCfg):
+    """Rough locomotion with an observable cyclic trot reference."""
+
+    # Append sin/cos of the gait phase after the original 235 observations.
+    observation_space = 237
+    gait_phase_clock = True
+    gait_phase_frequency = 2.5  # [Hz], close to the measured 0.39-s baseline stride
+    gait_phase_duty_factor = 0.55
+    gait_phase_contact_reward_scale = 0.75
+
+
+@configclass
+class AnymaltrainingDomainRandomizationEventCfg:
+    """Per-environment physics variations applied once when simulation starts."""
+
+    robot_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            "static_friction_range": (0.6, 1.3),
+            "dynamic_friction_range": (0.5, 1.2),
+            "restitution_range": (0.0, 0.05),
+            "num_buckets": 64,
+        },
+    )
+    base_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "mass_distribution_params": (0.85, 1.15),
+            "operation": "scale",
+            "distribution": "log_uniform",
+        },
+    )
+    base_center_of_mass = EventTerm(
+        func=mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            "com_range": {"x": (-0.03, 0.03), "y": (-0.03, 0.03), "z": (-0.015, 0.015)},
+        },
+    )
+    actuator_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            "stiffness_distribution_params": (0.9, 1.1),
+            "damping_distribution_params": (0.9, 1.1),
+            "operation": "scale",
+            "distribution": "log_uniform",
+        },
+    )
+
+
+@configclass
+class AnymaltrainingRoughDomainRandomizedEnvCfg(AnymaltrainingRoughEnvCfg):
+    """Rough locomotion with moderate dynamics and disturbance randomization."""
+
+    events: AnymaltrainingDomainRandomizationEventCfg = AnymaltrainingDomainRandomizationEventCfg()
+
+    # Mild reset variation prevents dependence on one perfectly repeated initial state.
+    initial_joint_position_noise = 0.05  # [rad]
+    initial_joint_velocity_noise = 0.05  # [rad/s]
+    initial_base_tilt = 0.035  # [rad], approximately 2 degrees
+    initial_base_linear_velocity = 0.05  # [m/s]
+    initial_base_angular_velocity = 0.05  # [rad/s]
+
+    # Retain traversal ability while learning recovery from modest disturbances.
+    push_interval_range_s = (5.0, 10.0)
+    max_push_velocity = 0.2  # [m/s]
+
+
+@configclass
+class AnymaltrainingOODEventCfg:
+    """Held-out physics ranges outside the domain-randomization training support."""
+
+    robot_material = EventTerm(
+        func=mdp.randomize_rigid_body_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names=".*"),
+            # DR training: static 0.6-1.3, dynamic 0.5-1.2, restitution 0.0-0.05.
+            "static_friction_range": (0.35, 0.55),
+            "dynamic_friction_range": (0.30, 0.45),
+            "restitution_range": (0.10, 0.20),
+            "num_buckets": 64,
+        },
+    )
+    base_mass = EventTerm(
+        func=mdp.randomize_rigid_body_mass,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            # DR training: 0.85-1.15.
+            "mass_distribution_params": (1.20, 1.35),
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
+    base_center_of_mass = EventTerm(
+        func=mdp.randomize_rigid_body_com,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", body_names="base"),
+            # DR training magnitudes: x/y <= 0.03 m and z <= 0.015 m.
+            "com_range": {"x": (0.04, 0.06), "y": (-0.06, -0.04), "z": (0.02, 0.03)},
+        },
+    )
+    actuator_gains = EventTerm(
+        func=mdp.randomize_actuator_gains,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+            # DR training: both gains 0.9-1.1.
+            "stiffness_distribution_params": (0.75, 0.88),
+            "damping_distribution_params": (1.12, 1.25),
+            "operation": "scale",
+            "distribution": "uniform",
+        },
+    )
+
+
+@configclass
+class AnymaltrainingRoughOODEnvCfg(AnymaltrainingRoughEnvCfg):
+    """Evaluation-only rough task using a held-out dynamics stress distribution."""
+
+    events: AnymaltrainingOODEventCfg = AnymaltrainingOODEventCfg()

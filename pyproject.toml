@@ -60,7 +60,7 @@ all = [
 ]
 
 [tool.ruff]
-line-length = 120
+line-length = 140
 target-version = "py310"
 
 # Exclude directories
@@ -89,6 +89,7 @@ select = [
 # Ignore specific rules (matching your flake8 config)
 ignore = [
     "E402",   # Module level import not at top of file
+    "E501",   # Line too long
     "D401",   # First line should be in imperative mood
     "RET504", # Unnecessary variable assignment before return statement
     "RET505", # Unnecessary elif after return statement
